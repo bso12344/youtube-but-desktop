@@ -23,11 +23,11 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": ["x64", "arm64"]
         },
         {
-          "target": "portable",
-          "arch": ["x64"]
+          "target": "zip",
+          "arch": ["x64", "arm64"]
         }
       ],
       "icon": "icon.ico"
@@ -37,12 +37,13 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "YouTube Desktop"
+      "shortcutName": "YouTube Desktop",
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     }
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "electron": "^44.4.3",
