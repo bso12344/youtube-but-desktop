@@ -487,7 +487,7 @@ function isYouTubeUrl(url) {
     const host = parsed.hostname.toLowerCase();
     if (host === 'studio.youtube.com') return false;
     if (host !== 'www.youtube.com' && host !== 'youtube.com' && host !== 'm.youtube.com') {
-      return host.endsWith('.googlevideo.com') || host.endsWith('.accounts.google.com');
+      return host.endsWith('googlevideo.com') || host.endsWith('accounts.google.com') || host.endsWith('accounts.youtube.com');
     }
     return true;
   } catch (e) {
