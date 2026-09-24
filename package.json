@@ -23,11 +23,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "icon.ico"
@@ -45,7 +49,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@xhayper/discord-rpc": "^1.2.1"
+    "@xhayper/discord-rpc": "^1.5.1"
   },
   "devDependencies": {
     "electron": "^44.4.3",
