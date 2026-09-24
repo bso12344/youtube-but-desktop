@@ -13,6 +13,7 @@ A lightweight, standalone desktop client for YouTube built with **Electron**. Fe
 * Minimize to **System Tray** on close.
 * Launch on System Boot.
 * Auto-hide navigation bar on hover out.
+* And more.
 
 
 * 🌐 **Multi-language Support:** Automatically matches system language (English, Vietnamese, Spanish, French, German, Japanese, Korean, Chinese).
