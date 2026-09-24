@@ -624,7 +624,7 @@ function createWindow() {
               const ghBtn = document.createElement('button');
               ghBtn.innerText = 'GitHub Repo';
               ghBtn.style.cssText = 'background: #333; color: #fff; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;';
-              ghBtn.onclick = () => window.electronAPI.openExternal('https://github.com/bso12344/youtube-but-desktop');
+              ghBtn.onclick = () => window.electronAPI.openExternal('https://github.com');
 
               aboutBox.appendChild(ghBtn);
               content.appendChild(aboutBox);
@@ -820,8 +820,9 @@ function updateDiscordActivity(data) {
     const currentTime = data.currentTime || 0;
     const duration = data.duration || 0;
 
+    const detailsPrefix = isPlaying ? 'Now playing: ' : 'Paused: ';
     activity = {
-      details: data.title.slice(0, 128),
+      details: (detailsPrefix + data.title).slice(0, 128),
       state: (data.channelName ? data.channelName : 'YouTube').slice(0, 128),
       largeImageKey: 'youtube_logo',
       largeImageText: 'YouTube Desktop',
@@ -830,6 +831,7 @@ function updateDiscordActivity(data) {
       instance: false
     };
 
+    // startTimestamp + endTimestamp cùng lúc -> Discord tự vẽ thanh progress bar
     if (isPlaying && duration > 0) {
       activity.startTimestamp = Math.floor(now - currentTime * 1000);
       activity.endTimestamp = Math.floor(now + (duration - currentTime) * 1000);
@@ -838,7 +840,7 @@ function updateDiscordActivity(data) {
     }
 
     if (data.url) {
-      activity.buttons = [{ label: 'Xem trên YouTube', url: data.url }];
+      activity.buttons = [{ label: 'Watch', url: data.url }];
     }
   } else {
     activity = {
