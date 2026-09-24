@@ -23,11 +23,11 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": ["x64"]
         },
         {
-          "target": "zip",
-          "arch": ["x64", "arm64"]
+          "target": "portable",
+          "arch": ["x64"]
         }
       ],
       "icon": "icon.ico"
@@ -37,14 +37,16 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "YouTube Desktop",
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "shortcutName": "YouTube Desktop"
     }
   },
   "keywords": [],
   "author": "",
-  "license": "MIT",
+  "license": "ISC",
   "type": "commonjs",
+  "dependencies": {
+    "@xhayper/discord-rpc": "^1.2.1"
+  },
   "devDependencies": {
     "electron": "^44.4.3",
     "electron-builder": "^26.15.3"
