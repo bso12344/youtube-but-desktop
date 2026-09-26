@@ -1,7 +1,21 @@
-const { app, BrowserWindow, shell, Menu, Tray, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, Tray, ipcMain, globalShortcut, nativeImage, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client: DiscordRPCClient } = require('@xhayper/discord-rpc');
+let autoUpdater = null;
+try {
+  ({ autoUpdater } = require('electron-updater'));
+} catch (e) {
+  // electron-updater chưa được cài (chạy `npm install`) -> bỏ qua tính năng cập nhật tự động
+}
+
+// Icon 32x32 PNG (base64) dùng cho nút Play/Pause/Next/Prev trên Taskbar (Windows Thumbar)
+const THUMBAR_ICONS_B64 = {
+  play: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR4nO3WMQrAQAhEUQ25/5VNJVhtos4gAX8byDx2mxXZtu0vmZkx/ntlEWhIChAhowBHICBlAArSBkTIKMARWQgUUIFQABEyCnDECXKzAaqqp+/UE3gbFyGdwJdhCiAz7MGuoDIuAjiB6nAb0B32SleAGk/FehFt2/YAD0ZECRmTb4cAAAAASUVORK5CYII=',
+  pause: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAOUlEQVR4nO3OsQ0AMAgDQcj+O5MFKEgR0dzXtnQRkpbLyaiqqj1n5sum60wAPwMAAAAAAAAAWAdIuj8DCCaKPMysAAAAAElFTkSuQmCC',
+  next: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhUlEQVR4nO3UwQ7AIAgD0LLs/3+ZnUjcDlNLDRd6VvsCiUCn0ymOzQ64u5vZ9Nz3zqvk5/7FPKjMEiAQJyDLgBFSClAjKEAgFBAaMEJKAVmEBBAIBiIDjJBSwO6veVcVRyQTYMslgEw5kFhBtjhCTUBVTgGU5cDGCtTFkaUJnCrvdDoA8ACrCDggre1sbAAAAABJRU5ErkJggg==',
+  prev: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAi0lEQVR4nO2WQQ6AMAgEwfj/L+OJQxtjs+w2TQxzFncCFWvWNM1hfPVARMRQ4L6smeu/ai7kZSiz/Bv3qeBE3gEkXC6AhpuJRlAJTugOMOG0ABtuVhyBIjiBO6AMLwmgm1AukBIqEeoQKiToz5CVkGxCZiTSVVyRkP+MUIkt9wFkJFsvJOqd0TT/5AGSTSw4wm74GQAAAABJRU5ErkJggg=='
+};
 
 const DEBUG = false;
 const APP_NAME = 'YouTube';
@@ -42,7 +56,15 @@ const I18N = {
     settingsTray: 'Thu xuống System Tray khi bấm nút X',
     settingsBoot: 'Khởi động cùng Windows',
     settingsNav: 'Tự động ẩn cụm nút điều hướng',
-    settingsDiscord: 'Hiển thị đang xem trên Discord (Rich Presence)'
+    settingsDiscord: 'Hiển thị đang xem trên Discord (Rich Presence)',
+    settingsMainAdBlock: 'Tự động tắt tiếng & bỏ qua QC ở cửa sổ chính',
+    settingsResume: 'Tự động mở lại video đang xem lần trước',
+    settingsAutoUpdate: 'Tự động kiểm tra bản cập nhật',
+    settingsNotifyEnd: 'Thông báo khi video kết thúc',
+    settingsAudioOnly: 'Chế độ chỉ nghe (tắt hình, tiết kiệm tài nguyên)',
+    settingsAccentColor: 'Màu chủ đề',
+    checkUpdateBtn: 'Kiểm tra cập nhật',
+    audioOnlyLabel: '🎧 Chế độ chỉ nghe đang bật'
   },
   en: {
     pipTitle: 'Playing in Picture-in-Picture',
@@ -53,7 +75,15 @@ const I18N = {
     settingsTray: 'Minimize to System Tray on close',
     settingsBoot: 'Start on System Boot',
     settingsNav: 'Auto-hide navigation bar',
-    settingsDiscord: 'Show what you are watching on Discord (Rich Presence)'
+    settingsDiscord: 'Show what you are watching on Discord (Rich Presence)',
+    settingsMainAdBlock: 'Auto-mute & skip ads on the main window',
+    settingsResume: 'Resume the last watched video on startup',
+    settingsAutoUpdate: 'Automatically check for updates',
+    settingsNotifyEnd: 'Notify when a video ends',
+    settingsAudioOnly: 'Audio-only mode (hide video, save resources)',
+    settingsAccentColor: 'Accent color',
+    checkUpdateBtn: 'Check for updates',
+    audioOnlyLabel: '🎧 Audio-only mode is on'
   },
   es: {
     pipTitle: 'Reproduciendo en Picture-in-Picture',
@@ -64,7 +94,15 @@ const I18N = {
     settingsTray: 'Minimizar a la bandeja del sistema al cerrar',
     settingsBoot: 'Iniciar con Windows',
     settingsNav: 'Ocultar automáticamente la barra de navegación',
-    settingsDiscord: 'Mostrar lo que ves en Discord (Rich Presence)'
+    settingsDiscord: 'Mostrar lo que ves en Discord (Rich Presence)',
+    settingsMainAdBlock: 'Silenciar y saltar anuncios en la ventana principal',
+    settingsResume: 'Reanudar el último video visto al iniciar',
+    settingsAutoUpdate: 'Buscar actualizaciones automáticamente',
+    settingsNotifyEnd: 'Notificar cuando un video termina',
+    settingsAudioOnly: 'Modo solo audio (ocultar video, ahorrar recursos)',
+    settingsAccentColor: 'Color de acento',
+    checkUpdateBtn: 'Buscar actualizaciones',
+    audioOnlyLabel: '🎧 Modo solo audio activado'
   },
   fr: {
     pipTitle: 'Lecture en Picture-in-Picture',
@@ -75,7 +113,15 @@ const I18N = {
     settingsTray: 'Réduire dans la barre des tâches à la fermeture',
     settingsBoot: 'Lancer au démarrage de Windows',
     settingsNav: 'Masquer automatiquement la barre de navigation',
-    settingsDiscord: 'Afficher ce que vous regardez sur Discord (Rich Presence)'
+    settingsDiscord: 'Afficher ce que vous regardez sur Discord (Rich Presence)',
+    settingsMainAdBlock: 'Couper le son et passer les pubs sur la fenêtre principale',
+    settingsResume: 'Reprendre la dernière vidéo regardée au démarrage',
+    settingsAutoUpdate: 'Vérifier automatiquement les mises à jour',
+    settingsNotifyEnd: 'Notifier à la fin d’une vidéo',
+    settingsAudioOnly: 'Mode audio seul (masquer la vidéo, économiser les ressources)',
+    settingsAccentColor: 'Couleur d’accent',
+    checkUpdateBtn: 'Vérifier les mises à jour',
+    audioOnlyLabel: '🎧 Mode audio seul activé'
   },
   de: {
     pipTitle: 'Wird im Picture-in-Picture-Modus wiedergegeben',
@@ -86,7 +132,15 @@ const I18N = {
     settingsTray: 'Beim Schließen in den System Tray minimieren',
     settingsBoot: 'Mit Windows starten',
     settingsNav: 'Navigationsleiste automatisch ausblenden',
-    settingsDiscord: 'Auf Discord anzeigen, was du schaust (Rich Presence)'
+    settingsDiscord: 'Auf Discord anzeigen, was du schaust (Rich Presence)',
+    settingsMainAdBlock: 'Werbung im Hauptfenster automatisch stummschalten & überspringen',
+    settingsResume: 'Zuletzt angesehenes Video beim Start fortsetzen',
+    settingsAutoUpdate: 'Automatisch nach Updates suchen',
+    settingsNotifyEnd: 'Benachrichtigen, wenn ein Video endet',
+    settingsAudioOnly: 'Nur-Audio-Modus (Video ausblenden, Ressourcen sparen)',
+    settingsAccentColor: 'Akzentfarbe',
+    checkUpdateBtn: 'Nach Updates suchen',
+    audioOnlyLabel: '🎧 Nur-Audio-Modus aktiv'
   },
   ja: {
     pipTitle: 'ピクチャー イン ピクチャーで再生中',
@@ -97,7 +151,15 @@ const I18N = {
     settingsTray: '閉じる時にシステムトレイに最小化',
     settingsBoot: 'Windows起動時に実行',
     settingsNav: 'ナビゲーションバーを自動的に隠す',
-    settingsDiscord: 'Discordで視聴中の動画を表示する（Rich Presence）'
+    settingsDiscord: 'Discordで視聴中の動画を表示する（Rich Presence）',
+    settingsMainAdBlock: 'メインウィンドウの広告を自動でミュート・スキップ',
+    settingsResume: '起動時に前回視聴していた動画を再開',
+    settingsAutoUpdate: '自動的にアップデートを確認',
+    settingsNotifyEnd: '動画終了時に通知',
+    settingsAudioOnly: '音声のみモード（映像を隠してリソース節約）',
+    settingsAccentColor: 'アクセントカラー',
+    checkUpdateBtn: 'アップデートを確認',
+    audioOnlyLabel: '🎧 音声のみモードがオンです'
   },
   ko: {
     pipTitle: 'PIP 모드로 재생 중',
@@ -108,7 +170,15 @@ const I18N = {
     settingsTray: '닫을 때 시스템 트레이로 최소화',
     settingsBoot: 'Windows 시작 시 자동 실행',
     settingsNav: '탐색 모음 자동 숨기기',
-    settingsDiscord: 'Discord에 시청 중인 영상 표시 (Rich Presence)'
+    settingsDiscord: 'Discord에 시청 중인 영상 표시 (Rich Presence)',
+    settingsMainAdBlock: '메인 창에서 광고 자동 음소거 및 건너뛰기',
+    settingsResume: '시작 시 마지막으로 보던 동영상 이어보기',
+    settingsAutoUpdate: '자동으로 업데이트 확인',
+    settingsNotifyEnd: '동영상이 끝나면 알림',
+    settingsAudioOnly: '오디오 전용 모드 (영상 숨김, 리소스 절약)',
+    settingsAccentColor: '강조 색상',
+    checkUpdateBtn: '업데이트 확인',
+    audioOnlyLabel: '🎧 오디오 전용 모드 켜짐'
   },
   zh: {
     pipTitle: '正在画中画模式下播放',
@@ -119,7 +189,15 @@ const I18N = {
     settingsTray: '关闭时最小化到系统托盘',
     settingsBoot: '开机自启动',
     settingsNav: '自动隐藏导航栏',
-    settingsDiscord: '在 Discord 上显示正在观看的内容（Rich Presence）'
+    settingsDiscord: '在 Discord 上显示正在观看的内容（Rich Presence）',
+    settingsMainAdBlock: '主窗口自动静音并跳过广告',
+    settingsResume: '启动时继续播放上次观看的视频',
+    settingsAutoUpdate: '自动检查更新',
+    settingsNotifyEnd: '视频结束时通知',
+    settingsAudioOnly: '仅音频模式（隐藏视频，节省资源）',
+    settingsAccentColor: '主题色',
+    checkUpdateBtn: '检查更新',
+    audioOnlyLabel: '🎧 仅音频模式已开启'
   }
 };
 
@@ -131,7 +209,15 @@ let userSettings = {
   autoHideNav: false,
   alwaysOnTop: false,
   pipAdMute: true, // Mặc định bật tự động ẩn/tắt tiếng QC trên PiP
-  discordRPC: true // Mặc định bật Discord Rich Presence
+  discordRPC: true, // Mặc định bật Discord Rich Presence
+  mainWindowAdBlock: true, // Tự mute + auto-skip QC ở cửa sổ chính
+  resumeWatching: true, // Nhớ video đang xem để mở lại lần sau
+  autoUpdateCheck: true, // Tự kiểm tra bản cập nhật
+  accentColor: '#ff0000', // Màu chủ đề cho thanh nav/nút bấm riêng của app
+  globalMuted: false, // Trạng thái mute đồng bộ toàn app (phím tắt Ctrl+M)
+  notifyOnVideoEnd: true, // Thông báo desktop khi video kết thúc
+  notifyNewSubscription: false, // (thử nghiệm) báo video mới từ kênh đã theo dõi
+  audioOnlyMode: false // Chế độ chỉ nghe: ẩn hình, giảm tải để tiết kiệm CPU/GPU
 };
 
 // Đọc settings từ máy
@@ -141,6 +227,48 @@ try {
   }
 } catch (e) {
   console.error('Loi doc settings:', e);
+}
+
+// --- RESUME WATCHING: nhớ video đang xem để mở lại lần sau ---
+const resumePath = path.join(app.getPath('userData'), 'resume-state.json');
+let resumeState = null; // { url, currentTime, savedAt }
+let lastResumeSaveAt = 0;
+
+try {
+  if (fs.existsSync(resumePath)) {
+    resumeState = JSON.parse(fs.readFileSync(resumePath, 'utf8'));
+  }
+} catch (e) {
+  resumeState = null;
+}
+
+function saveResumeState(url, currentTime) {
+  resumeState = { url, currentTime, savedAt: Date.now() };
+  try {
+    fs.writeFileSync(resumePath, JSON.stringify(resumeState));
+  } catch (e) {
+    console.error('Loi ghi resume-state:', e);
+  }
+}
+
+function getStartUrl() {
+  if (
+    userSettings.resumeWatching &&
+    resumeState &&
+    resumeState.url &&
+    typeof resumeState.currentTime === 'number' &&
+    resumeState.currentTime > 3 // bỏ qua nếu mới xem có vài giây, coi như chưa xem
+  ) {
+    try {
+      const u = new URL(resumeState.url);
+      // Chỉ resume các link watch hợp lệ của youtube.com để tránh mở nhầm URL lạ
+      if ((u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') && u.pathname === '/watch') {
+        u.searchParams.set('t', Math.floor(resumeState.currentTime) + 's');
+        return u.toString();
+      }
+    } catch (e) {}
+  }
+  return 'https://www.youtube.com';
 }
 
 function saveUserSettings(newSettings) {
@@ -185,7 +313,7 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL('https://www.youtube.com');
+  mainWindow.loadURL(getStartUrl());
 
   if (DEBUG) {
     mainWindow.webContents.once('did-finish-load', () => {
@@ -233,6 +361,7 @@ function createWindow() {
       (function() {
         const SVG_NS = 'http://www.w3.org/2000/svg';
         const I18N = ${JSON.stringify(I18N)};
+        const ACCENT = ${JSON.stringify(userSettings.accentColor || '#ff0000')};
 
         // --- Trạng thái Document Picture-in-Picture (PiP thật, không reload trang) ---
         let docPipVideoRef = null;
@@ -401,6 +530,15 @@ function createWindow() {
             openSettingsModal();
           }));
 
+          // Item 4: Bật/tắt nhanh Chế độ chỉ nghe (Audio-only)
+          menu.appendChild(makeMenuItem('Chế độ chỉ nghe', 'M12 3c-4.97 0-9 4.03-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1c0-3.87 3.13-7 7-7s7 3.13 7 7v1h-4v8h4c1.1 0 2-.9 2-2v-7c0-4.97-4.03-9-9-9z', () => {
+            if (window.electronAPI) {
+              window.electronAPI.getSettings().then((s) => {
+                window.electronAPI.saveSettings({ audioOnlyMode: !s.audioOnlyMode });
+              });
+            }
+          }));
+
           (document.body || document.documentElement).appendChild(menu);
         }
 
@@ -533,8 +671,8 @@ function createWindow() {
             overlay.style.cssText = 'position: absolute !important; top: 0 !important; left: 0 !important; width: 100% !important; height: 100% !important; background: rgba(12, 12, 12, 0.95) !important; backdrop-filter: blur(20px) !important; z-index: 9999 !important; display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; color: #fff !important; font-family: Roboto, Arial, sans-serif !important; gap: 12px !important;';
 
             const iconWrap = document.createElement('div');
-            iconWrap.style.cssText = 'width:64px;height:64px;border-radius:50%;background:rgba(255,0,0,0.15);display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,0,0,0.3);';
-            iconWrap.innerHTML = '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:#ff0000"><path d="M19 11h-8v6h8v-6zm4 8V5c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 0H3V5h18v14z"/></svg>';
+            iconWrap.style.cssText = 'width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.2);background:' + ACCENT + '26;border-color:' + ACCENT + '4d;';
+            iconWrap.innerHTML = '<svg viewBox="0 0 24 24" style="width:32px;height:32px;fill:' + ACCENT + '"><path d="M19 11h-8v6h8v-6zm4 8V5c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 0H3V5h18v14z"/></svg>';
 
             const titleEl = document.createElement('div');
             titleEl.style.cssText = 'font-size: 18px; font-weight: bold; color: #fff;';
@@ -581,11 +719,11 @@ function createWindow() {
           modal.style.cssText = 'position: fixed !important; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.7) !important; backdrop-filter: blur(8px) !important; z-index: 2147483647 !important; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #fff;';
 
           const box = document.createElement('div');
-          box.style.cssText = 'width: 440px; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.9);';
+          box.style.cssText = 'width: 440px; max-height: 85vh; overflow-y: auto; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.9);';
 
           const title = document.createElement('h2');
           title.innerText = 'Cài đặt YouTube Desktop';
-          title.style.cssText = 'margin: 0 0 20px 0; font-size: 18px; color: #ff0000; display: flex; justify-content: space-between; align-items: center;';
+          title.style.cssText = 'margin: 0 0 20px 0; font-size: 18px; color: ' + ACCENT + '; display: flex; justify-content: space-between; align-items: center;';
 
           const content = document.createElement('div');
           content.style.cssText = 'display: flex; flex-direction: column; gap: 14px; font-size: 14px;';
@@ -596,7 +734,7 @@ function createWindow() {
             const input = document.createElement('input');
             input.type = 'checkbox';
             input.checked = !!settings[key];
-            input.style.cssText = 'width: 16px; height: 16px; cursor: pointer; accent-color: #ff0000;';
+            input.style.cssText = 'width: 16px; height: 16px; cursor: pointer; accent-color: ' + ACCENT + ';';
             input.onchange = () => {
               settings[key] = input.checked;
               if (window.electronAPI) window.electronAPI.saveSettings(settings);
@@ -608,13 +746,43 @@ function createWindow() {
             return wrap;
           }
 
+          function createColorPicker(label, key, settings) {
+            const wrap = document.createElement('label');
+            wrap.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; justify-content: space-between;';
+            const span = document.createElement('span');
+            span.innerText = label;
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.value = settings[key] || '#ff0000';
+            input.style.cssText = 'width: 36px; height: 26px; border: none; border-radius: 6px; cursor: pointer; background: transparent; padding: 0;';
+            input.onchange = () => {
+              settings[key] = input.value;
+              if (window.electronAPI) window.electronAPI.saveSettings(settings);
+            };
+            wrap.appendChild(span);
+            wrap.appendChild(input);
+            return wrap;
+          }
+
           if (window.electronAPI) {
             window.electronAPI.getSettings().then(s => {
               content.appendChild(createCheckbox(dict.settingsTray, 'minimizeToTray', s));
               content.appendChild(createCheckbox(dict.settingsBoot, 'startOnBoot', s));
               content.appendChild(createCheckbox(dict.settingsNav, 'autoHideNav', s));
               content.appendChild(createCheckbox(dict.settingsPipAd, 'pipAdMute', s));
+              content.appendChild(createCheckbox(dict.settingsMainAdBlock, 'mainWindowAdBlock', s));
               content.appendChild(createCheckbox(dict.settingsDiscord, 'discordRPC', s));
+              content.appendChild(createCheckbox(dict.settingsResume, 'resumeWatching', s));
+              content.appendChild(createCheckbox(dict.settingsAutoUpdate, 'autoUpdateCheck', s));
+              content.appendChild(createCheckbox(dict.settingsNotifyEnd, 'notifyOnVideoEnd', s));
+              content.appendChild(createCheckbox(dict.settingsAudioOnly, 'audioOnlyMode', s));
+              content.appendChild(createColorPicker(dict.settingsAccentColor, 'accentColor', s));
+
+              const updateBtn = document.createElement('button');
+              updateBtn.innerText = dict.checkUpdateBtn;
+              updateBtn.style.cssText = 'margin-top: 4px; padding: 8px 12px; background: #333; color: #fff; border: 1px solid #555; border-radius: 8px; cursor: pointer; font-size: 13px;';
+              updateBtn.onclick = () => { if (window.electronAPI) window.electronAPI.checkForUpdates(); };
+              content.appendChild(updateBtn);
 
               // Phần About
               const aboutBox = document.createElement('div');
@@ -633,7 +801,7 @@ function createWindow() {
 
           const closeBtn = document.createElement('button');
           closeBtn.innerText = 'Đóng';
-          closeBtn.style.cssText = 'margin-top: 20px; width: 100%; padding: 10px; background: #ff0000; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;';
+          closeBtn.style.cssText = 'margin-top: 20px; width: 100%; padding: 10px; background: ' + ACCENT + '; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;';
           closeBtn.onclick = () => modal.style.display = 'none';
 
           box.appendChild(title);
@@ -691,11 +859,109 @@ function createWindow() {
           }
         }
 
+        // --- CACHE SETTINGS: đọc định kỳ để dùng cho ad-block/audio-only/mute mà không cần
+        // gọi IPC liên tục trong các interval nhanh. Dùng window.* để không bị reset mỗi lần
+        // script được tiêm lại (script này chạy lại mỗi 2s).
+        if (!window.__ytAppSettingsPoll) {
+          window.__ytAppSettingsCache = {};
+          const pollSettings = () => {
+            if (window.electronAPI) {
+              window.electronAPI.getSettings().then((s) => { window.__ytAppSettingsCache = s || {}; }).catch(() => {});
+            }
+          };
+          pollSettings();
+          window.__ytAppSettingsPoll = setInterval(pollSettings, 3000);
+        }
+
+        // --- CHẶN/TỰ ĐỘNG BỎ QUA QUẢNG CÁO Ở CỬA SỔ CHÍNH ---
+        if (!window.__ytMainAdBlockInterval) {
+          window.__ytMainAdWasMuted = false;
+          window.__ytMainAdBlockInterval = setInterval(() => {
+            try {
+              const s = window.__ytAppSettingsCache || {};
+              if (!s.mainWindowAdBlock) return;
+              const player = document.getElementById('movie_player');
+              const video = document.querySelector('video');
+              if (!player || !video) return;
+              const isAd = player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting');
+              if (isAd) {
+                window.__ytMainAdWasMuted = true;
+                video.muted = true;
+                const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button');
+                if (skipBtn) { try { skipBtn.click(); } catch (e) {} }
+              } else if (window.__ytMainAdWasMuted) {
+                window.__ytMainAdWasMuted = false;
+                video.muted = false;
+              }
+            } catch (e) {}
+          }, 500);
+        }
+
+        // --- CHẾ ĐỘ CHỈ NGHE (AUDIO-ONLY): ẩn hình bằng overlay đen phủ kín player,
+        // hạ chất lượng video xuống thấp nhất để giảm tải giải mã hình ---
+        function applyAudioOnlyMode(enabled) {
+          const player = document.getElementById('movie_player');
+          if (!player) return;
+          if (getComputedStyle(player).position === 'static') {
+            player.style.position = 'relative';
+          }
+          let overlay = player.querySelector('#yt-app-audio-only-overlay');
+          if (enabled) {
+            if (!overlay) {
+              overlay = document.createElement('div');
+              overlay.id = 'yt-app-audio-only-overlay';
+              overlay.style.cssText = 'position:absolute;inset:0;z-index:80;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-family:Roboto,Arial,sans-serif;font-size:14px;text-align:center;padding:16px;box-sizing:border-box;';
+              overlay.innerText = getDict().audioOnlyLabel;
+              player.appendChild(overlay);
+            }
+            overlay.style.display = 'flex';
+            try {
+              if (typeof player.setPlaybackQualityRange === 'function') player.setPlaybackQualityRange('tiny', 'tiny');
+              if (typeof player.setPlaybackQuality === 'function') player.setPlaybackQuality('tiny');
+            } catch (e) {}
+          } else if (overlay) {
+            overlay.style.display = 'none';
+          }
+        }
+
+        // --- MUTE ĐỒNG BỘ TOÀN APP: áp dụng lại trạng thái mute đã lưu MỘT LẦN mỗi khi
+        // chuyển sang video mới (không áp mỗi tick để không đè lên thao tác unmute thủ công của user) ---
+        function getCurrentVideoId() {
+          try { return new URLSearchParams(location.search).get('v'); } catch (e) { return null; }
+        }
+
+        function applyGlobalMuteOncePerVideo() {
+          const vid = getCurrentVideoId();
+          if (!vid || window.__ytAppLastMuteAppliedVideoId === vid) return;
+          const s = window.__ytAppSettingsCache || {};
+          const video = document.querySelector('video');
+          if (video && typeof s.globalMuted === 'boolean') {
+            video.muted = s.globalMuted;
+            window.__ytAppLastMuteAppliedVideoId = vid;
+          }
+        }
+
+        // --- THÔNG BÁO DESKTOP KHI VIDEO KẾT THÚC ---
+        function bindVideoEndedListener() {
+          const video = document.querySelector('video');
+          if (!video || video.__ytAppEndedBound) return;
+          video.__ytAppEndedBound = true;
+          video.addEventListener('ended', () => {
+            if (window.electronAPI && window.electronAPI.notifyVideoEnded) {
+              const info = getYtVideoInfo();
+              window.electronAPI.notifyVideoEnded({ title: info.title || 'YouTube' });
+            }
+          });
+        }
+
         function runAll() {
           try { updateTitle(); } catch(e){}
           try { createButtons(); } catch(e){}
           try { createDisclaimer(); } catch(e){}
           try { sendDiscordPresence(); } catch(e){}
+          try { applyAudioOnlyMode(!!(window.__ytAppSettingsCache && window.__ytAppSettingsCache.audioOnlyMode)); } catch(e){}
+          try { applyGlobalMuteOncePerVideo(); } catch(e){}
+          try { bindVideoEndedListener(); } catch(e){}
         }
 
         runAll();
@@ -871,6 +1137,121 @@ function updateDiscordActivity(data) {
 }
 
 
+// --- HELPER: chạy JS trong trang chính từ main process (dùng cho media keys, thumbbar, shortcut) ---
+function runInPage(code) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.executeJavaScript(code).catch(() => {});
+}
+
+// --- TASKBAR: nút Prev/Play-Pause/Next trên icon Taskbar (Windows) + thanh tiến trình ---
+let thumbarLastIsPlaying = null;
+
+function buildThumbarIcon(key) {
+  return nativeImage.createFromDataURL('data:image/png;base64,' + THUMBAR_ICONS_B64[key]);
+}
+
+function updateThumbar(isPlaying) {
+  if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+  if (isPlaying === thumbarLastIsPlaying) return; // tránh vẽ lại thumbbar liên tục không cần thiết
+  thumbarLastIsPlaying = isPlaying;
+
+  mainWindow.setThumbarButtons([
+    {
+      tooltip: 'Lùi 10 giây',
+      icon: buildThumbarIcon('prev'),
+      click: () => runInPage("(function(){var v=document.querySelector('video'); if(v){ v.currentTime = Math.max(0, v.currentTime - 10); } })();")
+    },
+    {
+      tooltip: isPlaying ? 'Tạm dừng' : 'Phát',
+      icon: buildThumbarIcon(isPlaying ? 'pause' : 'play'),
+      click: () => runInPage("(function(){var v=document.querySelector('video'); if(v){ v.paused ? v.play() : v.pause(); } })();")
+    },
+    {
+      tooltip: 'Video tiếp theo',
+      icon: buildThumbarIcon('next'),
+      click: () => runInPage("(function(){var b=document.querySelector('.ytp-next-button'); if(b) b.click(); })();")
+    }
+  ]);
+}
+
+// data: { page, title, channelName, url, isPlaying, currentTime, duration } — payload dùng chung cho Discord/Thumbbar/Resume
+function updatePlaybackUI(data) {
+  if (!mainWindow || mainWindow.isDestroyed() || !data) return;
+
+  if (data.page !== 'watch') {
+    updateThumbar(false);
+    if (process.platform === 'win32') mainWindow.setProgressBar(-1); // ẩn thanh tiến trình khi không xem video
+    return;
+  }
+
+  const isPlaying = !!data.isPlaying;
+  updateThumbar(isPlaying);
+
+  if (process.platform === 'win32') {
+    const duration = data.duration || 0;
+    const currentTime = data.currentTime || 0;
+    if (duration > 0) {
+      const fraction = Math.min(1, Math.max(0, currentTime / duration));
+      mainWindow.setProgressBar(fraction, { mode: isPlaying ? 'normal' : 'paused' });
+    } else {
+      mainWindow.setProgressBar(-1);
+    }
+  }
+
+  // Lưu trạng thái để mở lại lần sau (resume watching) — chỉ ghi đĩa tối đa mỗi 10s để tránh ghi file liên tục
+  if (userSettings.resumeWatching && data.url && data.duration > 0) {
+    const now = Date.now();
+    if (now - lastResumeSaveAt > 10000) {
+      lastResumeSaveAt = now;
+      saveResumeState(data.url, data.currentTime || 0);
+    }
+  }
+}
+
+// --- MEDIA KEYS & PHÍM TẮT TOÀN CỤC ---
+function registerGlobalShortcuts() {
+  try {
+    globalShortcut.register('MediaPlayPause', () => {
+      runInPage("(function(){var v=document.querySelector('video'); if(v){ v.paused ? v.play() : v.pause(); } })();");
+    });
+    globalShortcut.register('MediaNextTrack', () => {
+      runInPage("(function(){var b=document.querySelector('.ytp-next-button'); if(b) b.click(); })();");
+    });
+    globalShortcut.register('MediaPreviousTrack', () => {
+      runInPage("(function(){var v=document.querySelector('video'); if(v){ v.currentTime = Math.max(0, v.currentTime - 10); } })();");
+    });
+    // Ctrl+M (Cmd+M trên macOS): mute/unmute đồng bộ toàn app, không cần thao tác trong trang
+    globalShortcut.register('CommandOrControl+M', () => {
+      runInPage(`
+        (function(){
+          var v = document.querySelector('video');
+          if (!v) return;
+          v.muted = !v.muted;
+          if (window.electronAPI) window.electronAPI.saveSettings({ globalMuted: v.muted });
+        })();
+      `);
+    });
+  } catch (e) {
+    console.warn('Khong the dang ky global shortcut (co the bi app khac chiem):', e.message);
+  }
+}
+
+// --- AUTO UPDATER ---
+function initAutoUpdater(silent) {
+  if (!autoUpdater) return; // chưa `npm install electron-updater`
+  try {
+    autoUpdater.autoDownload = true;
+    if (silent) {
+      autoUpdater.checkForUpdates().catch(() => {});
+    } else {
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    }
+  } catch (e) {
+    console.warn('Auto-updater loi (co the chua cau hinh "publish" trong package.json):', e.message);
+  }
+}
+
+
 ipcMain.handle('toggle-always-on-top', () => {
   if (mainWindow) {
     const state = !mainWindow.isAlwaysOnTop();
@@ -887,7 +1268,21 @@ ipcMain.handle('save-settings', (event, newSettings) => {
   return userSettings;
 });
 ipcMain.on('open-external', (event, url) => shell.openExternal(url));
-ipcMain.on('discord-presence-update', (event, data) => updateDiscordActivity(data));
+ipcMain.on('discord-presence-update', (event, data) => {
+  updateDiscordActivity(data);
+  updatePlaybackUI(data);
+});
+ipcMain.on('check-for-updates', () => initAutoUpdater(false));
+ipcMain.on('video-ended', (event, data) => {
+  if (!userSettings.notifyOnVideoEnd) return;
+  try {
+    new Notification({
+      title: 'Video đã kết thúc',
+      body: (data && data.title) ? data.title : 'YouTube Desktop',
+      silent: false
+    }).show();
+  } catch (e) {}
+});
 
 // --- XỬ LÝ CỬA SỔ FLOATING PIP CỦA ELECTRON ---
 ipcMain.handle('open-custom-pip', async (event, { url, currentTime }) => {
@@ -1092,6 +1487,11 @@ ipcMain.handle('open-custom-pip', async (event, { url, currentTime }) => {
 app.whenReady().then(() => {
   createWindow();
   initDiscordRPC();
+  registerGlobalShortcuts();
+  if (userSettings.autoUpdateCheck) {
+    // Đợi vài giây cho app ổn định rồi mới kiểm tra, tránh chặn thời gian khởi động
+    setTimeout(() => initAutoUpdater(true), 5000);
+  }
 
   tray = new Tray(path.join(__dirname, 'icon.ico'));
   const contextMenu = Menu.buildFromTemplate([
@@ -1117,4 +1517,5 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   destroyDiscordRPC();
+  globalShortcut.unregisterAll();
 });

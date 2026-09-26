@@ -19,19 +19,20 @@
       "icon.ico",
       "package.json"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "DAN_TEN_GITHUB_CUA_BAN",
+      "repo": "DAN_TEN_REPO_CUA_BAN"
+    },
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         },
         {
           "target": "portable",
-          "arch": [
-            "x64"
-          ]
+          "arch": ["x64"]
         }
       ],
       "icon": "icon.ico"
@@ -49,7 +50,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@xhayper/discord-rpc": "^1.5.1"
+    "@xhayper/discord-rpc": "^1.2.1",
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "electron": "^44.4.3",
