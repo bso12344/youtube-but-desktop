@@ -1,5 +1,5 @@
 {
-  "name": "youtubeapp",
+  "name": "youtube-desktop",
   "version": "2.0.0",
   "description": "YouTube Desktop Application",
   "main": "main.js",
@@ -10,14 +10,12 @@
   "build": {
     "appId": "com.bso.youtubedesktop",
     "productName": "YouTube Desktop",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "directories": {
       "output": "dist"
     },
     "files": [
-      "main.js",
-      "preload.js",
-      "icon.ico",
-      "package.json"
+      "**/*"
     ],
     "publish": {
       "provider": "github",
@@ -28,11 +26,19 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "arm64"]
+          "arch": ["x64"]
+        },
+        {
+          "target": "nsis",
+          "arch": ["arm64"]
         },
         {
           "target": "portable",
-          "arch": ["x64", "arm64"]
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["arm64"]
         }
       ],
       "icon": "icon.ico"
@@ -54,7 +60,7 @@
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "electron": "^44.4.3",
+    "electron": "^34.2.0",
     "electron-builder": "^26.15.3"
   }
 }
