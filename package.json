@@ -21,8 +21,8 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "DAN_TEN_GITHUB_CUA_BAN",
-      "repo": "DAN_TEN_REPO_CUA_BAN"
+      "owner": "bso12344",
+      "repo": "youtube-but-desktop"
     },
     "win": {
       "target": [
