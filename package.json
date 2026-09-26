@@ -33,11 +33,11 @@
           "arch": ["arm64"]
         },
         {
-          "target": "portable",
+          "target": "zip",
           "arch": ["x64"]
         },
         {
-          "target": "portable",
+          "target": "zip",
           "arch": ["arm64"]
         }
       ],
