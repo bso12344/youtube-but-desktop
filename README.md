@@ -72,7 +72,7 @@ npm run build
 
 ## 📄 Disclaimer
 
-This is an unofficial personal project built with Electron. It is **not affiliated with, endorsed by, or sponsored by** YouTube or Google LLC. All trademarks and logos belong to YouTube / Google LLC.
+This is an unofficial personal project built with Electron. It is **not affiliated with, endorsed by, or sponsored by** YouTube or Google LLC. All trademarks belong to YouTube / Google LLC. All icons belong to Flavicon.
 
 ---
 
