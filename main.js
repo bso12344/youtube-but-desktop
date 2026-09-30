@@ -64,7 +64,8 @@ const I18N = {
     settingsAudioOnly: 'Chế độ chỉ nghe (tắt hình, tiết kiệm tài nguyên)',
     settingsAccentColor: 'Màu chủ đề',
     checkUpdateBtn: 'Kiểm tra cập nhật',
-    audioOnlyLabel: '🎧 Chế độ chỉ nghe đang bật'
+    audioOnlyLabel: '🎧 Chế độ chỉ nghe đang bật',
+    settingsAudioEnhance: 'Tăng cường chất lượng âm thanh (bù nén YouTube)'
   },
   en: {
     pipTitle: 'Playing in Picture-in-Picture',
@@ -83,7 +84,8 @@ const I18N = {
     settingsAudioOnly: 'Audio-only mode (hide video, save resources)',
     settingsAccentColor: 'Accent color',
     checkUpdateBtn: 'Check for updates',
-    audioOnlyLabel: '🎧 Audio-only mode is on'
+    audioOnlyLabel: '🎧 Audio-only mode is on',
+    settingsAudioEnhance: 'Enhance audio quality (compensate YouTube compression)'
   },
   es: {
     pipTitle: 'Reproduciendo en Picture-in-Picture',
@@ -102,7 +104,8 @@ const I18N = {
     settingsAudioOnly: 'Modo solo audio (ocultar video, ahorrar recursos)',
     settingsAccentColor: 'Color de acento',
     checkUpdateBtn: 'Buscar actualizaciones',
-    audioOnlyLabel: '🎧 Modo solo audio activado'
+    audioOnlyLabel: '🎧 Modo solo audio activado',
+    settingsAudioEnhance: 'Mejorar la calidad del audio (compensar compresión de YouTube)'
   },
   fr: {
     pipTitle: 'Lecture en Picture-in-Picture',
@@ -121,7 +124,8 @@ const I18N = {
     settingsAudioOnly: 'Mode audio seul (masquer la vidéo, économiser les ressources)',
     settingsAccentColor: 'Couleur d’accent',
     checkUpdateBtn: 'Vérifier les mises à jour',
-    audioOnlyLabel: '🎧 Mode audio seul activé'
+    audioOnlyLabel: '🎧 Mode audio seul activé',
+    settingsAudioEnhance: 'Améliorer la qualité audio (compenser la compression YouTube)'
   },
   de: {
     pipTitle: 'Wird im Picture-in-Picture-Modus wiedergegeben',
@@ -140,7 +144,8 @@ const I18N = {
     settingsAudioOnly: 'Nur-Audio-Modus (Video ausblenden, Ressourcen sparen)',
     settingsAccentColor: 'Akzentfarbe',
     checkUpdateBtn: 'Nach Updates suchen',
-    audioOnlyLabel: '🎧 Nur-Audio-Modus aktiv'
+    audioOnlyLabel: '🎧 Nur-Audio-Modus aktiv',
+    settingsAudioEnhance: 'Audioqualität verbessern (YouTube-Kompression ausgleichen)'
   },
   ja: {
     pipTitle: 'ピクチャー イン ピクチャーで再生中',
@@ -159,7 +164,8 @@ const I18N = {
     settingsAudioOnly: '音声のみモード（映像を隠してリソース節約）',
     settingsAccentColor: 'アクセントカラー',
     checkUpdateBtn: 'アップデートを確認',
-    audioOnlyLabel: '🎧 音声のみモードがオンです'
+    audioOnlyLabel: '🎧 音声のみモードがオンです',
+    settingsAudioEnhance: '音質を強化する（YouTubeの圧縮を補正）'
   },
   ko: {
     pipTitle: 'PIP 모드로 재생 중',
@@ -178,7 +184,8 @@ const I18N = {
     settingsAudioOnly: '오디오 전용 모드 (영상 숨김, 리소스 절약)',
     settingsAccentColor: '강조 색상',
     checkUpdateBtn: '업데이트 확인',
-    audioOnlyLabel: '🎧 오디오 전용 모드 켜짐'
+    audioOnlyLabel: '🎧 오디오 전용 모드 켜짐',
+    settingsAudioEnhance: '음질 향상 (YouTube 압축 보정)'
   },
   zh: {
     pipTitle: '正在画中画模式下播放',
@@ -197,7 +204,8 @@ const I18N = {
     settingsAudioOnly: '仅音频模式（隐藏视频，节省资源）',
     settingsAccentColor: '主题色',
     checkUpdateBtn: '检查更新',
-    audioOnlyLabel: '🎧 仅音频模式已开启'
+    audioOnlyLabel: '🎧 仅音频模式已开启',
+    settingsAudioEnhance: '增强音质（补偿 YouTube 压缩）'
   }
 };
 
@@ -217,7 +225,10 @@ let userSettings = {
   globalMuted: false, // Trạng thái mute đồng bộ toàn app (phím tắt Ctrl+M)
   notifyOnVideoEnd: true, // Thông báo desktop khi video kết thúc
   notifyNewSubscription: false, // (thử nghiệm) báo video mới từ kênh đã theo dõi
-  audioOnlyMode: false // Chế độ chỉ nghe: ẩn hình, giảm tải để tiết kiệm CPU/GPU
+  audioOnlyMode: false, // Chế độ chỉ nghe: ẩn hình, giảm tải để tiết kiệm CPU/GPU
+  audioEnhanceEnabled: false, // Tăng cường chất lượng âm thanh (EQ + nén) để bù lại việc YouTube bóp nén audio
+  audioEnhancePreset: 'balanced', // 'off' | 'balanced' | 'bassBoost' | 'vocalClarity' | 'loudness'
+  audioOutputDeviceId: 'default' // deviceId của loa/tai nghe muốn phát ra, 'default' = theo hệ thống
 };
 
 // Đọc settings từ máy
@@ -262,7 +273,11 @@ function getStartUrl() {
     try {
       const u = new URL(resumeState.url);
       // Chỉ resume các link watch hợp lệ của youtube.com để tránh mở nhầm URL lạ
-      if ((u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') && u.pathname === '/watch') {
+      if (
+        (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') &&
+        u.pathname === '/watch' &&
+        !(u.hostname === 'account.youtube.com' || u.hostname === 'account.google.com')
+      ) {
         u.searchParams.set('t', Math.floor(resumeState.currentTime) + 's');
         return u.toString();
       }
@@ -776,6 +791,75 @@ function createWindow() {
               content.appendChild(createCheckbox(dict.settingsAutoUpdate, 'autoUpdateCheck', s));
               content.appendChild(createCheckbox(dict.settingsNotifyEnd, 'notifyOnVideoEnd', s));
               content.appendChild(createCheckbox(dict.settingsAudioOnly, 'audioOnlyMode', s));
+
+              // --- Tăng cường chất lượng âm thanh ---
+              content.appendChild(createCheckbox(dict.settingsAudioEnhance, 'audioEnhanceEnabled', s));
+
+              const presetWrap = document.createElement('label');
+              presetWrap.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; justify-content: space-between; padding-left: 26px;';
+              const presetSpan = document.createElement('span');
+              presetSpan.innerText = 'Kiểu tăng cường';
+              presetSpan.style.cssText = 'font-size: 13px; color: #ccc;';
+              const presetSelect = document.createElement('select');
+              presetSelect.style.cssText = 'background:#2a2a2a;color:#fff;border:1px solid #555;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;';
+              [
+                ['balanced', '🔈 Cân bằng'],
+                ['bassBoost', '🔊 Tăng Bass'],
+                ['vocalClarity', '🗣️ Rõ giọng nói'],
+                ['loudness', '📢 Tăng cảm giác to']
+              ].forEach(([val, label]) => {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.innerText = label;
+                if ((s.audioEnhancePreset || 'balanced') === val) opt.selected = true;
+                presetSelect.appendChild(opt);
+              });
+              presetSelect.onchange = () => {
+                s.audioEnhancePreset = presetSelect.value;
+                if (window.electronAPI) window.electronAPI.saveSettings(s);
+              };
+              presetWrap.appendChild(presetSpan);
+              presetWrap.appendChild(presetSelect);
+              content.appendChild(presetWrap);
+
+              // --- Chọn thiết bị âm thanh đầu ra ---
+              const outputWrap = document.createElement('label');
+              outputWrap.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; justify-content: space-between;';
+              const outputSpan = document.createElement('span');
+              outputSpan.innerText = 'Đầu ra âm thanh';
+              const outputSelect = document.createElement('select');
+              outputSelect.style.cssText = 'background:#2a2a2a;color:#fff;border:1px solid #555;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;max-width:220px;';
+              const loadingOpt = document.createElement('option');
+              loadingOpt.innerText = 'Đang tải danh sách...';
+              outputSelect.appendChild(loadingOpt);
+              outputWrap.appendChild(outputSpan);
+              outputWrap.appendChild(outputSelect);
+              content.appendChild(outputWrap);
+
+              if (typeof listAudioOutputDevices === 'function') {
+                listAudioOutputDevices().then((devices) => {
+                  outputSelect.innerHTML = '';
+                  const defaultOpt = document.createElement('option');
+                  defaultOpt.value = 'default';
+                  defaultOpt.innerText = '🔊 Theo hệ thống (mặc định)';
+                  outputSelect.appendChild(defaultOpt);
+                  devices.forEach((d) => {
+                    if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') return;
+                    const opt = document.createElement('option');
+                    opt.value = d.deviceId;
+                    opt.innerText = d.label || ('Thiết bị ' + d.deviceId.slice(0, 8));
+                    if ((s.audioOutputDeviceId || 'default') === d.deviceId) opt.selected = true;
+                    outputSelect.appendChild(opt);
+                  });
+                  outputSelect.onchange = () => {
+                    s.audioOutputDeviceId = outputSelect.value;
+                    if (window.electronAPI) window.electronAPI.saveSettings(s);
+                  };
+                }).catch(() => {
+                  outputSelect.innerHTML = '<option>Không lấy được danh sách thiết bị</option>';
+                });
+              }
+
               content.appendChild(createColorPicker(dict.settingsAccentColor, 'accentColor', s));
 
               const updateBtn = document.createElement('button');
@@ -792,7 +876,7 @@ function createWindow() {
               const ghBtn = document.createElement('button');
               ghBtn.innerText = 'GitHub Repo';
               ghBtn.style.cssText = 'background: #333; color: #fff; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;';
-              ghBtn.onclick = () => window.electronAPI.openExternal('https://github.com');
+              ghBtn.onclick = () => window.electronAPI.openExternal('https://github.com/bso12344/youtube-but-desktop');
 
               aboutBox.appendChild(ghBtn);
               content.appendChild(aboutBox);
@@ -954,6 +1038,144 @@ function createWindow() {
           });
         }
 
+        // --- TĂNG CƯỜNG CHẤT LƯỢNG ÂM THANH (bù lại việc YouTube nén audio bitrate thấp) ---
+        // Dùng Web Audio API: Low-shelf (bass) -> Peaking (mid/vocal) -> High-shelf (treble/air)
+        // -> DynamicsCompressor (tăng độ "đầy", tránh vỡ tiếng khi boost) -> Gain bù trừ -> loa.
+        const AUDIO_ENHANCE_PRESETS = {
+          off:          { low: 0,  mid: 0,  midFreq: 2500, midQ: 1,   high: 0,   compThreshold: 0,   compRatio: 1,   makeup: 1.0 },
+          balanced:     { low: 3,  mid: 0,  midFreq: 2500, midQ: 1,   high: 2,   compThreshold: -18, compRatio: 3,   makeup: 1.15 },
+          bassBoost:    { low: 7,  mid: -1, midFreq: 2500, midQ: 1,   high: 1,   compThreshold: -20, compRatio: 4,   makeup: 1.25 },
+          vocalClarity: { low: -1, mid: 4,  midFreq: 2800, midQ: 1.1, high: 2,   compThreshold: -16, compRatio: 2.5, makeup: 1.1 },
+          loudness:     { low: 1,  mid: 1,  midFreq: 2500, midQ: 1,   high: 1.5, compThreshold: -24, compRatio: 6,   makeup: 1.5 }
+        };
+
+        function setupAudioEnhance() {
+          const video = document.querySelector('video');
+          if (!video) return;
+          if (window.__ytAppAudioGraph && window.__ytAppAudioGraph.video === video) return; // đã setup đúng video này rồi
+
+          try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            const ctx = new AudioCtx();
+            const source = ctx.createMediaElementSource(video);
+
+            const lowShelf = ctx.createBiquadFilter();
+            lowShelf.type = 'lowshelf';
+            lowShelf.frequency.value = 100;
+
+            const midPeak = ctx.createBiquadFilter();
+            midPeak.type = 'peaking';
+            midPeak.frequency.value = 2500;
+            midPeak.Q.value = 1;
+
+            const highShelf = ctx.createBiquadFilter();
+            highShelf.type = 'highshelf';
+            highShelf.frequency.value = 9000;
+
+            const compressor = ctx.createDynamicsCompressor();
+            const makeupGain = ctx.createGain();
+
+            source.connect(lowShelf);
+            lowShelf.connect(midPeak);
+            midPeak.connect(highShelf);
+            highShelf.connect(compressor);
+            compressor.connect(makeupGain);
+            makeupGain.connect(ctx.destination);
+
+            window.__ytAppAudioGraph = { ctx, video, source, lowShelf, midPeak, highShelf, compressor, makeupGain };
+
+            if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+
+            // Graph vừa tạo dùng thiết bị mặc định -> áp lại thiết bị đã lưu (nếu có) ngay lập tức
+            const savedDeviceId = (window.__ytAppSettingsCache || {}).audioOutputDeviceId;
+            if (savedDeviceId && savedDeviceId !== 'default') {
+              applyAudioOutputDevice(savedDeviceId);
+            }
+          } catch (e) {
+            console.warn('Khong the khoi tao Audio Enhance:', e.message);
+          }
+        }
+
+        function applyAudioEnhancePreset(name) {
+          const g = window.__ytAppAudioGraph;
+          if (!g) return;
+          const p = AUDIO_ENHANCE_PRESETS[name] || AUDIO_ENHANCE_PRESETS.balanced;
+          const t = g.ctx.currentTime;
+          const RAMP = 0.3; // chuyển mượt trong 0.3s, tránh tiếng "click" khi đổi preset
+          try {
+            g.lowShelf.gain.setTargetAtTime(p.low, t, RAMP);
+            g.midPeak.gain.setTargetAtTime(p.mid, t, RAMP);
+            g.midPeak.frequency.setTargetAtTime(p.midFreq, t, RAMP);
+            g.midPeak.Q.setTargetAtTime(p.midQ, t, RAMP);
+            g.highShelf.gain.setTargetAtTime(p.high, t, RAMP);
+            g.compressor.threshold.setTargetAtTime(p.compThreshold, t, RAMP);
+            g.compressor.ratio.setTargetAtTime(p.compRatio, t, RAMP);
+            g.makeupGain.gain.setTargetAtTime(p.makeup, t, RAMP);
+          } catch (e) {}
+        }
+
+        function maybeApplyAudioEnhance() {
+          const s = window.__ytAppSettingsCache || {};
+          if (!s.audioEnhanceEnabled) {
+            // Nếu graph đã từng được tạo (do trước đó có bật) -> đưa về trạng thái trung tính (bypass),
+            // KHÔNG được bỏ qua vì audio đã đi qua Web Audio graph vĩnh viễn kể từ lần tạo đầu tiên.
+            if (window.__ytAppAudioGraph) applyAudioEnhancePreset('off');
+            return;
+          }
+          setupAudioEnhance();
+          applyAudioEnhancePreset(s.audioEnhancePreset || 'balanced');
+          if (window.__ytAppAudioGraph && window.__ytAppAudioGraph.ctx.state === 'suspended') {
+            window.__ytAppAudioGraph.ctx.resume().catch(() => {});
+          }
+        }
+
+        // --- CHỌN THIẾT BỊ ÂM THANH ĐẦU RA ---
+        // Nếu Audio Enhance đang bật -> đổi sinkId của AudioContext (Chrome 110+).
+        // Nếu không -> đổi sinkId trực tiếp trên thẻ <video> (hỗ trợ rộng hơn, lâu đời hơn).
+        async function listAudioOutputDevices() {
+          try {
+            const permission = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+            if (!permission || permission.state !== 'granted') {
+              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              stream.getTracks().forEach((t) => t.stop());
+            }
+          } catch (e) {
+            // Không xin được quyền -> vẫn thử liệt kê, có thể tên thiết bị sẽ trống
+          }
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            return devices.filter((d) => d.kind === 'audiooutput');
+          } catch (e) {
+            return [];
+          }
+        }
+
+        async function applyAudioOutputDevice(deviceId) {
+          const id = (!deviceId || deviceId === 'default') ? '' : deviceId;
+          try {
+            if (window.__ytAppAudioGraph && typeof window.__ytAppAudioGraph.ctx.setSinkId === 'function') {
+              await window.__ytAppAudioGraph.ctx.setSinkId(id);
+            } else {
+              const video = document.querySelector('video');
+              if (video && typeof video.setSinkId === 'function') {
+                await video.setSinkId(id);
+              }
+            }
+            window.__ytAppLastAppliedSinkId = deviceId || 'default';
+          } catch (e) {
+            console.warn('Khong the doi thiet bi am thanh dau ra:', e.message);
+            throw e;
+          }
+        }
+
+        function maybeApplyAudioOutputDevice() {
+          const s = window.__ytAppSettingsCache || {};
+          const wanted = s.audioOutputDeviceId || 'default';
+          if (window.__ytAppLastAppliedSinkId === wanted) return; // đã đúng thiết bị rồi, khỏi gọi lại
+          if (!document.querySelector('video')) return;
+          applyAudioOutputDevice(wanted).catch(() => {});
+        }
+
         function runAll() {
           try { updateTitle(); } catch(e){}
           try { createButtons(); } catch(e){}
@@ -962,6 +1184,8 @@ function createWindow() {
           try { applyAudioOnlyMode(!!(window.__ytAppSettingsCache && window.__ytAppSettingsCache.audioOnlyMode)); } catch(e){}
           try { applyGlobalMuteOncePerVideo(); } catch(e){}
           try { bindVideoEndedListener(); } catch(e){}
+          try { maybeApplyAudioEnhance(); } catch(e){}
+          try { maybeApplyAudioOutputDevice(); } catch(e){}
         }
 
         runAll();
@@ -1485,6 +1709,14 @@ ipcMain.handle('open-custom-pip', async (event, { url, currentTime }) => {
 
 // --- SYSTEM TRAY ---
 app.whenReady().then(() => {
+  // Tự cấp quyền "media" cho session mặc định để navigator.mediaDevices.enumerateDevices()
+  // trả về TÊN THẬT của loa/tai nghe (Chromium ẩn tên thiết bị nếu chưa có quyền mic/cam nào
+  // được cấp, vì lý do chống fingerprinting). App KHÔNG thu âm gì cả, chỉ cần quyền để đọc tên thiết bị output.
+  const { session } = require('electron');
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    callback(permission === 'media');
+  });
+
   createWindow();
   initDiscordRPC();
   registerGlobalShortcuts();
