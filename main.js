@@ -35,7 +35,7 @@ const APP_NAME = 'YouTube';
 // 3. Vào tab "Rich Presence" > "Art Assets" và upload 2 ảnh với đúng tên key:
 //    - "youtube_logo" (ảnh lớn)
 //    - "play_icon", "pause_icon" (ảnh nhỏ, tuỳ chọn)
-const DISCORD_CLIENT_ID = 'DAN_CLIENT_ID_CUA_BAN_VAO_DAY';
+const DISCORD_CLIENT_ID = '1552667187448250510';
 
 let rpcClient = null;
 let rpcIsConnected = false;
