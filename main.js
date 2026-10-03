@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, Tray, ipcMain, globalShortcut, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, shell, Menu, Tray, ipcMain, globalShortcut, nativeImage, Notification, clipboard, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client: DiscordRPCClient } = require('@xhayper/discord-rpc');
@@ -17,6 +17,15 @@ const THUMBAR_ICONS_B64 = {
   prev: 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAi0lEQVR4nO2WQQ6AMAgEwfj/L+OJQxtjs+w2TQxzFncCFWvWNM1hfPVARMRQ4L6smeu/ai7kZSiz/Bv3qeBE3gEkXC6AhpuJRlAJTugOMOG0ABtuVhyBIjiBO6AMLwmgm1AukBIqEeoQKiToz5CVkGxCZiTSVVyRkP+MUIkt9wFkJFsvJOqd0TT/5AGSTSw4wm74GQAAAABJRU5ErkJggg=='
 };
 
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+  appendErrorLog('main-uncaughtException', err && err.stack ? err.stack : String(err));
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason);
+  appendErrorLog('main-unhandledRejection', reason && reason.stack ? reason.stack : String(reason));
+});
+
 const DEBUG = false;
 const APP_NAME = 'YouTube';
 
@@ -26,7 +35,7 @@ const APP_NAME = 'YouTube';
 // 3. Vào tab "Rich Presence" > "Art Assets" và upload 2 ảnh với đúng tên key:
 //    - "youtube_logo" (ảnh lớn)
 //    - "play_icon", "pause_icon" (ảnh nhỏ, tuỳ chọn)
-const DISCORD_CLIENT_ID = '1552667187448250510';
+const DISCORD_CLIENT_ID = 'DAN_CLIENT_ID_CUA_BAN_VAO_DAY';
 
 let rpcClient = null;
 let rpcIsConnected = false;
@@ -44,6 +53,7 @@ let pipWindow = null;
 let tray = null;
 let isQuitting = false;
 let injectInterval = null;
+let lastClipboardPrompted = '';
 
 // --- BỘ TỪ ĐIỂN ĐA NGÔN NGỮ (I18N) ---
 const I18N = {
@@ -228,7 +238,12 @@ let userSettings = {
   audioOnlyMode: false, // Chế độ chỉ nghe: ẩn hình, giảm tải để tiết kiệm CPU/GPU
   audioEnhanceEnabled: false, // Tăng cường chất lượng âm thanh (EQ + nén) để bù lại việc YouTube bóp nén audio
   audioEnhancePreset: 'balanced', // 'off' | 'balanced' | 'bassBoost' | 'vocalClarity' | 'loudness'
-  audioOutputDeviceId: 'default' // deviceId của loa/tai nghe muốn phát ra, 'default' = theo hệ thống
+  audioOutputDeviceId: 'default', // deviceId của loa/tai nghe muốn phát ra, 'default' = theo hệ thống
+  sponsorBlockEnabled: true, // Tự động bỏ qua đoạn quảng cáo tài trợ (SponsorBlock)
+  autoPipOnMinimize: false, // Tự bật Real PiP khi minimize cửa sổ chính
+  focusMode: false, // Ẩn sidebar/comment, chỉ còn trình phát
+  forceHighestQuality: false, // Luôn ép chất lượng video/audio cao nhất có thể
+  clipboardWatch: false // Hỏi mở video khi phát hiện link YouTube trong clipboard lúc focus app
 };
 
 // Đọc settings từ máy
@@ -273,17 +288,78 @@ function getStartUrl() {
     try {
       const u = new URL(resumeState.url);
       // Chỉ resume các link watch hợp lệ của youtube.com để tránh mở nhầm URL lạ
-      if (
-        (u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') &&
-        u.pathname === '/watch' &&
-        !(u.hostname === 'account.youtube.com' || u.hostname === 'account.google.com')
-      ) {
+      if ((u.hostname === 'www.youtube.com' || u.hostname === 'youtube.com') && u.pathname === '/watch') {
         u.searchParams.set('t', Math.floor(resumeState.currentTime) + 's');
         return u.toString();
       }
     } catch (e) {}
   }
   return 'https://www.youtube.com';
+}
+
+// --- LỊCH SỬ XEM GẦN ĐÂY (local, không cần đăng nhập Google) ---
+const historyPath = path.join(app.getPath('userData'), 'watch-history.json');
+let watchHistory = [];
+const MAX_HISTORY_ITEMS = 25;
+
+try {
+  if (fs.existsSync(historyPath)) {
+    watchHistory = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+    if (!Array.isArray(watchHistory)) watchHistory = [];
+  }
+} catch (e) {
+  watchHistory = [];
+}
+
+function getVideoIdFromYtUrl(url) {
+  try {
+    const u = new URL(url);
+    return u.searchParams.get('v');
+  } catch (e) {
+    return null;
+  }
+}
+
+function addToWatchHistory(data) {
+  const videoId = getVideoIdFromYtUrl(data.url);
+  if (!videoId) return;
+
+  const existingIdx = watchHistory.findIndex((h) => h.videoId === videoId);
+  const entry = {
+    videoId,
+    title: data.title || 'YouTube',
+    channelName: data.channelName || '',
+    url: data.url,
+    currentTime: data.currentTime || 0,
+    duration: data.duration || 0,
+    watchedAt: Date.now()
+  };
+
+  if (existingIdx !== -1) watchHistory.splice(existingIdx, 1);
+  watchHistory.unshift(entry);
+  if (watchHistory.length > MAX_HISTORY_ITEMS) watchHistory.length = MAX_HISTORY_ITEMS;
+
+  try {
+    fs.writeFileSync(historyPath, JSON.stringify(watchHistory));
+  } catch (e) {
+    console.error('Loi ghi watch-history:', e);
+  }
+}
+
+// --- GHI LOG LỖI RA FILE (để debug khi script inject bị hỏng do YouTube đổi giao diện) ---
+const errorLogPath = path.join(app.getPath('userData'), 'app-error.log');
+const MAX_LOG_SIZE = 2 * 1024 * 1024; // 2MB
+
+function appendErrorLog(source, message) {
+  try {
+    if (fs.existsSync(errorLogPath) && fs.statSync(errorLogPath).size > MAX_LOG_SIZE) {
+      // File quá lớn -> chỉ giữ lại 500 dòng cuối để tránh phình vô hạn
+      const lines = fs.readFileSync(errorLogPath, 'utf8').split('\n');
+      fs.writeFileSync(errorLogPath, lines.slice(-500).join('\n'));
+    }
+    const line = `[${new Date().toISOString()}] [${source}] ${message}\n`;
+    fs.appendFileSync(errorLogPath, line);
+  } catch (e) {}
 }
 
 function saveUserSettings(newSettings) {
@@ -355,6 +431,58 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('context-menu', (e) => e.preventDefault());
+
+  // 2b. Auto-PiP khi minimize: tự nổi video lên PiP thật, trả về khi mở lại cửa sổ
+  mainWindow.on('minimize', () => {
+    if (!userSettings.autoPipOnMinimize) return;
+    runInPage(`
+      (function(){
+        var v = document.querySelector('video');
+        if (v && !v.paused && window.__ytAppOpenPip && !window.__ytAppAutoPipActive) {
+          window.__ytAppAutoPipActive = true;
+          window.__ytAppOpenPip(v);
+        }
+      })();
+    `);
+  });
+
+  mainWindow.on('restore', () => {
+    if (!userSettings.autoPipOnMinimize) return;
+    runInPage(`
+      (function(){
+        if (window.__ytAppAutoPipActive && window.__ytAppClosePip) {
+          window.__ytAppClosePip();
+          window.__ytAppAutoPipActive = false;
+        }
+      })();
+    `);
+  });
+
+  // 2c. Mở video từ clipboard: khi focus lại cửa sổ, kiểm tra có link YouTube mới trong clipboard không
+  mainWindow.on('focus', () => {
+    if (!userSettings.clipboardWatch) return;
+    try {
+      const text = clipboard.readText().trim();
+      const match = text.match(/^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=[\w-]+|youtu\.be\/[\w-]+)/i);
+      if (match && text && text !== lastClipboardPrompted) {
+        lastClipboardPrompted = text;
+        dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          buttons: ['Mở video', 'Bỏ qua'],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'Phát hiện link YouTube',
+          message: 'Mở video này trong YouTube Desktop?',
+          detail: text
+        }).then((result) => {
+          if (result.response === 0 && mainWindow && !mainWindow.isDestroyed()) {
+            const url = text.startsWith('http') ? text : 'https://' + text;
+            mainWindow.loadURL(url);
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {}
+  });
 
   // 2. Thu xuống System Tray
   mainWindow.on('close', (event) => {
@@ -554,6 +682,25 @@ function createWindow() {
             }
           }));
 
+          // Item 5: Bật/tắt nhanh Chế độ tập trung
+          menu.appendChild(makeMenuItem('Chế độ tập trung', 'M12 9a3 3 0 100 6 3 3 0 000-6zm8.94 2a9.01 9.01 0 00-7.94-7.94V1h-2v2.06A9.01 9.01 0 003.06 11H1v2h2.06a9.01 9.01 0 007.94 7.94V23h2v-2.06A9.01 9.01 0 0020.94 13H23v-2h-2.06zM12 19a7 7 0 110-14 7 7 0 010 14z', () => {
+            if (window.electronAPI) {
+              window.electronAPI.getSettings().then((s) => {
+                window.electronAPI.saveSettings({ focusMode: !s.focusMode });
+              });
+            }
+          }));
+
+          // Item 6: Hẹn giờ tắt (Sleep Timer)
+          menu.appendChild(makeMenuItem('Hẹn giờ tắt', 'M12 2a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z', () => {
+            showSleepTimerPicker();
+          }));
+
+          // Item 7: Lịch sử xem gần đây
+          menu.appendChild(makeMenuItem('Lịch sử xem', 'M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6a7 7 0 117 7 6.9 6.9 0 01-4.95-2.05l-1.41 1.41A8.94 8.94 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8z', () => {
+            showWatchHistoryPanel();
+          }));
+
           (document.body || document.documentElement).appendChild(menu);
         }
 
@@ -675,6 +822,9 @@ function createWindow() {
           hideMainWindowPipOverlay();
         }
 
+        // Cho phép main process gọi vào đúng closure này (dùng cho Auto-PiP khi minimize cửa sổ)
+        window.__ytAppOpenPip = openDocumentPip;
+        window.__ytAppClosePip = closeDocumentPip;
 
         function showMainWindowPipOverlay() {
           let overlay = document.getElementById('yt-app-main-pip-overlay');
@@ -724,6 +874,146 @@ function createWindow() {
         }
 
         // --- D. BẢNG SETTINGS MODAL ---
+        // --- TOAST: thông báo nhỏ, tự biến mất, dùng cho Sleep Timer ---
+        function showAppToast(message, duration) {
+          let toast = document.getElementById('yt-app-toast');
+          if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'yt-app-toast';
+            toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 18px;border-radius:24px;font-family:Roboto,Arial,sans-serif;font-size:13px;z-index:2147483647;box-shadow:0 8px 24px rgba(0,0,0,0.5);transition:opacity .3s ease;opacity:0;pointer-events:none;';
+            document.body.appendChild(toast);
+          }
+          toast.innerText = message;
+          toast.style.opacity = '1';
+          clearTimeout(window.__ytAppToastTimeout);
+          window.__ytAppToastTimeout = setTimeout(() => { toast.style.opacity = '0'; }, duration || 3000);
+        }
+
+        // --- HẸN GIỜ TẮT (SLEEP TIMER) ---
+        function showSleepTimerPicker() {
+          let modal = document.getElementById('yt-app-sleep-modal');
+          if (modal) { modal.style.display = 'flex'; return; }
+
+          modal = document.createElement('div');
+          modal.id = 'yt-app-sleep-modal';
+          modal.style.cssText = 'position: fixed !important; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.7) !important; backdrop-filter: blur(8px) !important; z-index: 2147483647 !important; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #fff;';
+          modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+          const box = document.createElement('div');
+          box.style.cssText = 'width: 280px; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); display:flex; flex-direction:column; gap:8px;';
+
+          const title = document.createElement('h3');
+          title.innerText = '⏰ Hẹn giờ tắt';
+          title.style.cssText = 'margin:0 0 6px 0; font-size:16px; color:' + ACCENT + ';';
+          box.appendChild(title);
+
+          function addBtn(label, onClick) {
+            const btn = document.createElement('button');
+            btn.innerText = label;
+            btn.style.cssText = 'padding:10px; background:#2a2a2a; color:#fff; border:1px solid #444; border-radius:8px; cursor:pointer; font-size:13px; text-align:left;';
+            btn.onmouseenter = () => { btn.style.background = '#3a3a3a'; };
+            btn.onmouseleave = () => { btn.style.background = '#2a2a2a'; };
+            btn.onclick = () => { onClick(); modal.style.display = 'none'; };
+            box.appendChild(btn);
+          }
+
+          function setMinuteTimer(minutes) {
+            clearTimeout(window.__ytSleepTimerHandle);
+            window.__ytSleepAtEnd = false;
+            window.__ytSleepTimerHandle = setTimeout(() => {
+              const video = document.querySelector('video');
+              if (video) { try { video.pause(); } catch (e) {} }
+              showAppToast('⏰ Đã tạm dừng theo hẹn giờ ngủ');
+            }, minutes * 60000);
+            showAppToast('⏰ Sẽ tạm dừng sau ' + minutes + ' phút');
+          }
+
+          addBtn('15 phút', () => setMinuteTimer(15));
+          addBtn('30 phút', () => setMinuteTimer(30));
+          addBtn('60 phút', () => setMinuteTimer(60));
+          addBtn('Hết video này', () => {
+            clearTimeout(window.__ytSleepTimerHandle);
+            window.__ytSleepAtEnd = true;
+            try {
+              const toggle = document.querySelector('.ytp-autonav-toggle-button[aria-checked="true"]');
+              if (toggle) toggle.click(); // tắt autoplay video kế tiếp để không bị nhảy video trước khi kịp dừng
+            } catch (e) {}
+            showAppToast('⏰ Sẽ tạm dừng khi video hiện tại kết thúc');
+          });
+          addBtn('Huỷ hẹn giờ', () => {
+            clearTimeout(window.__ytSleepTimerHandle);
+            window.__ytSleepAtEnd = false;
+            showAppToast('Đã huỷ hẹn giờ');
+          });
+
+          modal.appendChild(box);
+          document.body.appendChild(modal);
+        }
+
+        // --- LỊCH SỬ XEM GẦN ĐÂY ---
+        function refreshHistoryList(modal) {
+          const list = modal.querySelector('#yt-app-history-list');
+          if (!list || !window.electronAPI || !window.electronAPI.getWatchHistory) return;
+          list.innerHTML = '<div style="color:#888;font-size:13px;">Đang tải...</div>';
+          window.electronAPI.getWatchHistory().then((items) => {
+            list.innerHTML = '';
+            if (!items || items.length === 0) {
+              list.innerHTML = '<div style="color:#888;font-size:13px;">Chưa có lịch sử nào.</div>';
+              return;
+            }
+            items.forEach((item) => {
+              const row = document.createElement('div');
+              row.style.cssText = 'display:flex; flex-direction:column; gap:2px; padding:10px; background:#2a2a2a; border-radius:8px; cursor:pointer;';
+              row.onmouseenter = () => { row.style.background = '#333'; };
+              row.onmouseleave = () => { row.style.background = '#2a2a2a'; };
+
+              const titleEl = document.createElement('div');
+              titleEl.innerText = item.title;
+              titleEl.style.cssText = 'font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+
+              const metaEl = document.createElement('div');
+              const pct = item.duration > 0 ? Math.round((item.currentTime / item.duration) * 100) : 0;
+              metaEl.innerText = (item.channelName || 'YouTube') + ' • ' + pct + '% đã xem';
+              metaEl.style.cssText = 'font-size:11px; color:#999;';
+
+              row.appendChild(titleEl);
+              row.appendChild(metaEl);
+              row.onclick = () => { location.href = item.url; };
+              list.appendChild(row);
+            });
+          }).catch(() => {
+            list.innerHTML = '<div style="color:#888;font-size:13px;">Không tải được lịch sử.</div>';
+          });
+        }
+
+        function showWatchHistoryPanel() {
+          let modal = document.getElementById('yt-app-history-modal');
+          if (modal) { modal.style.display = 'flex'; refreshHistoryList(modal); return; }
+
+          modal = document.createElement('div');
+          modal.id = 'yt-app-history-modal';
+          modal.style.cssText = 'position: fixed !important; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.7) !important; backdrop-filter: blur(8px) !important; z-index: 2147483647 !important; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #fff;';
+          modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+
+          const box = document.createElement('div');
+          box.style.cssText = 'width: 480px; max-height: 80vh; overflow-y: auto; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.9);';
+
+          const title = document.createElement('h3');
+          title.innerText = '🕘 Lịch sử xem gần đây';
+          title.style.cssText = 'margin:0 0 14px 0; font-size:16px; color:' + ACCENT + ';';
+          box.appendChild(title);
+
+          const list = document.createElement('div');
+          list.id = 'yt-app-history-list';
+          list.style.cssText = 'display:flex; flex-direction:column; gap:8px;';
+          box.appendChild(list);
+
+          modal.appendChild(box);
+          document.body.appendChild(modal);
+
+          refreshHistoryList(modal);
+        }
+
         function openSettingsModal() {
           let modal = document.getElementById('yt-app-settings-modal');
           if (modal) { modal.style.display = 'flex'; return; }
@@ -734,14 +1024,41 @@ function createWindow() {
           modal.style.cssText = 'position: fixed !important; top:0; left:0; width:100vw; height:100vh; background: rgba(0,0,0,0.7) !important; backdrop-filter: blur(8px) !important; z-index: 2147483647 !important; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #fff;';
 
           const box = document.createElement('div');
-          box.style.cssText = 'width: 440px; max-height: 85vh; overflow-y: auto; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.9);';
+          box.style.cssText = 'width: 460px; max-height: 85vh; background: #1f1f1f; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.9); display:flex; flex-direction:column;';
 
           const title = document.createElement('h2');
           title.innerText = 'Cài đặt YouTube Desktop';
-          title.style.cssText = 'margin: 0 0 20px 0; font-size: 18px; color: ' + ACCENT + '; display: flex; justify-content: space-between; align-items: center;';
+          title.style.cssText = 'margin: 0 0 16px 0; font-size: 18px; color: ' + ACCENT + ';';
 
-          const content = document.createElement('div');
-          content.style.cssText = 'display: flex; flex-direction: column; gap: 14px; font-size: 14px;';
+          // --- Thanh Tab ---
+          const tabBar = document.createElement('div');
+          tabBar.style.cssText = 'display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid rgba(255,255,255,0.1); flex-shrink:0;';
+
+          const tabNames = ['Chung', 'Âm thanh', 'Nâng cao', 'Giới thiệu'];
+          const tabButtons = {};
+          const tabPanels = {};
+
+          function selectTab(name) {
+            tabNames.forEach((n) => {
+              const isActive = n === name;
+              tabButtons[n].style.color = isActive ? ACCENT : '#999';
+              tabButtons[n].style.borderBottom = isActive ? '2px solid ' + ACCENT : '2px solid transparent';
+              tabPanels[n].style.display = isActive ? 'flex' : 'none';
+            });
+          }
+
+          tabNames.forEach((name) => {
+            const btn = document.createElement('button');
+            btn.innerText = name;
+            btn.style.cssText = 'background:none; border:none; padding:8px 12px; cursor:pointer; font-size:13px; font-weight:600; color:#999; border-bottom:2px solid transparent;';
+            btn.onclick = () => selectTab(name);
+            tabBar.appendChild(btn);
+            tabButtons[name] = btn;
+
+            const panel = document.createElement('div');
+            panel.style.cssText = 'display:none; flex-direction:column; gap:14px; font-size:14px; overflow-y:auto; max-height:56vh; padding-right:4px;';
+            tabPanels[name] = panel;
+          });
 
           function createCheckbox(label, key, settings) {
             const wrap = document.createElement('label');
@@ -779,21 +1096,34 @@ function createWindow() {
             return wrap;
           }
 
+          function createButton(label, onClick) {
+            const btn = document.createElement('button');
+            btn.innerText = label;
+            btn.style.cssText = 'padding: 8px 12px; background: #333; color: #fff; border: 1px solid #555; border-radius: 8px; cursor: pointer; font-size: 13px;';
+            btn.onclick = onClick;
+            return btn;
+          }
+
           if (window.electronAPI) {
             window.electronAPI.getSettings().then(s => {
-              content.appendChild(createCheckbox(dict.settingsTray, 'minimizeToTray', s));
-              content.appendChild(createCheckbox(dict.settingsBoot, 'startOnBoot', s));
-              content.appendChild(createCheckbox(dict.settingsNav, 'autoHideNav', s));
-              content.appendChild(createCheckbox(dict.settingsPipAd, 'pipAdMute', s));
-              content.appendChild(createCheckbox(dict.settingsMainAdBlock, 'mainWindowAdBlock', s));
-              content.appendChild(createCheckbox(dict.settingsDiscord, 'discordRPC', s));
-              content.appendChild(createCheckbox(dict.settingsResume, 'resumeWatching', s));
-              content.appendChild(createCheckbox(dict.settingsAutoUpdate, 'autoUpdateCheck', s));
-              content.appendChild(createCheckbox(dict.settingsNotifyEnd, 'notifyOnVideoEnd', s));
-              content.appendChild(createCheckbox(dict.settingsAudioOnly, 'audioOnlyMode', s));
+              // ===== TAB: CHUNG =====
+              const g = tabPanels['Chung'];
+              g.appendChild(createCheckbox(dict.settingsTray, 'minimizeToTray', s));
+              g.appendChild(createCheckbox(dict.settingsBoot, 'startOnBoot', s));
+              g.appendChild(createCheckbox(dict.settingsNav, 'autoHideNav', s));
+              g.appendChild(createCheckbox(dict.settingsResume, 'resumeWatching', s));
+              g.appendChild(createCheckbox(dict.settingsNotifyEnd, 'notifyOnVideoEnd', s));
+              g.appendChild(createCheckbox('Tự động bỏ qua đoạn quảng cáo tài trợ (SponsorBlock)', 'sponsorBlockEnabled', s));
+              g.appendChild(createCheckbox('Chế độ tập trung (ẩn sidebar/bình luận)', 'focusMode', s));
+              g.appendChild(createCheckbox('Hỏi mở video khi phát hiện link YouTube trong clipboard', 'clipboardWatch', s));
+              g.appendChild(createColorPicker(dict.settingsAccentColor, 'accentColor', s));
 
-              // --- Tăng cường chất lượng âm thanh ---
-              content.appendChild(createCheckbox(dict.settingsAudioEnhance, 'audioEnhanceEnabled', s));
+              // ===== TAB: ÂM THANH =====
+              const a = tabPanels['Âm thanh'];
+              a.appendChild(createCheckbox(dict.settingsPipAd, 'pipAdMute', s));
+              a.appendChild(createCheckbox(dict.settingsMainAdBlock, 'mainWindowAdBlock', s));
+              a.appendChild(createCheckbox(dict.settingsAudioOnly, 'audioOnlyMode', s));
+              a.appendChild(createCheckbox(dict.settingsAudioEnhance, 'audioEnhanceEnabled', s));
 
               const presetWrap = document.createElement('label');
               presetWrap.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; justify-content: space-between; padding-left: 26px;';
@@ -820,9 +1150,8 @@ function createWindow() {
               };
               presetWrap.appendChild(presetSpan);
               presetWrap.appendChild(presetSelect);
-              content.appendChild(presetWrap);
+              a.appendChild(presetWrap);
 
-              // --- Chọn thiết bị âm thanh đầu ra ---
               const outputWrap = document.createElement('label');
               outputWrap.style.cssText = 'display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; justify-content: space-between;';
               const outputSpan = document.createElement('span');
@@ -834,7 +1163,7 @@ function createWindow() {
               outputSelect.appendChild(loadingOpt);
               outputWrap.appendChild(outputSpan);
               outputWrap.appendChild(outputSelect);
-              content.appendChild(outputWrap);
+              a.appendChild(outputWrap);
 
               if (typeof listAudioOutputDevices === 'function') {
                 listAudioOutputDevices().then((devices) => {
@@ -860,36 +1189,61 @@ function createWindow() {
                 });
               }
 
-              content.appendChild(createColorPicker(dict.settingsAccentColor, 'accentColor', s));
+              // ===== TAB: NÂNG CAO =====
+              const adv = tabPanels['Nâng cao'];
+              adv.appendChild(createCheckbox(dict.settingsDiscord, 'discordRPC', s));
+              adv.appendChild(createCheckbox(dict.settingsAutoUpdate, 'autoUpdateCheck', s));
+              adv.appendChild(createCheckbox('Tự bật Real PiP khi minimize cửa sổ', 'autoPipOnMinimize', s));
+              adv.appendChild(createCheckbox('Luôn ép chất lượng video/audio cao nhất', 'forceHighestQuality', s));
 
-              const updateBtn = document.createElement('button');
-              updateBtn.innerText = dict.checkUpdateBtn;
-              updateBtn.style.cssText = 'margin-top: 4px; padding: 8px 12px; background: #333; color: #fff; border: 1px solid #555; border-radius: 8px; cursor: pointer; font-size: 13px;';
-              updateBtn.onclick = () => { if (window.electronAPI) window.electronAPI.checkForUpdates(); };
-              content.appendChild(updateBtn);
+              adv.appendChild(createButton(dict.checkUpdateBtn, () => {
+                if (window.electronAPI) window.electronAPI.checkForUpdates();
+              }));
 
-              // Phần About
-              const aboutBox = document.createElement('div');
-              aboutBox.style.cssText = 'margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 12px; color: #aaa; display: flex; justify-content: space-between; align-items: center;';
-              aboutBox.innerText = 'Phiên bản 1.0.0 (Open-Source)';
+              const ioWrap = document.createElement('div');
+              ioWrap.style.cssText = 'display:flex; gap:8px;';
+              ioWrap.appendChild(createButton('Xuất cấu hình', () => {
+                if (window.electronAPI) {
+                  window.electronAPI.exportSettings().then((r) => {
+                    showAppToast(r && r.ok ? 'Đã xuất cấu hình thành công' : 'Xuất cấu hình thất bại hoặc đã huỷ');
+                  });
+                }
+              }));
+              ioWrap.appendChild(createButton('Nhập cấu hình', () => {
+                if (window.electronAPI) {
+                  window.electronAPI.importSettings().then((r) => {
+                    showAppToast(r && r.ok ? 'Đã nhập cấu hình, khởi động lại để áp dụng đầy đủ' : 'Nhập cấu hình thất bại hoặc đã huỷ');
+                  });
+                }
+              }));
+              adv.appendChild(ioWrap);
 
-              const ghBtn = document.createElement('button');
-              ghBtn.innerText = 'GitHub Repo';
-              ghBtn.style.cssText = 'background: #333; color: #fff; border: 1px solid #555; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;';
-              ghBtn.onclick = () => window.electronAPI.openExternal('https://github.com/bso12344/youtube-but-desktop');
+              // ===== TAB: GIỚI THIỆU =====
+              const about = tabPanels['Giới thiệu'];
+              const aboutText = document.createElement('div');
+              aboutText.style.cssText = 'font-size: 13px; color: #ccc; line-height: 1.6;';
+              aboutText.innerText = 'YouTube Desktop — dự án cá nhân, mã nguồn mở, miễn phí. Không liên quan và không thuộc sở hữu của YouTube hay Google.';
+              about.appendChild(aboutText);
 
-              aboutBox.appendChild(ghBtn);
-              content.appendChild(aboutBox);
+              const versionText = document.createElement('div');
+              versionText.style.cssText = 'font-size: 12px; color: #888;';
+              versionText.innerText = 'Phiên bản 1.1.0';
+              about.appendChild(versionText);
+
+              about.appendChild(createButton('GitHub Repo', () => window.electronAPI.openExternal('https://github.com')));
             });
           }
 
+          selectTab('Chung');
+
           const closeBtn = document.createElement('button');
           closeBtn.innerText = 'Đóng';
-          closeBtn.style.cssText = 'margin-top: 20px; width: 100%; padding: 10px; background: ' + ACCENT + '; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;';
+          closeBtn.style.cssText = 'margin-top: 16px; width: 100%; padding: 10px; background: ' + ACCENT + '; color: #fff; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; flex-shrink:0;';
           closeBtn.onclick = () => modal.style.display = 'none';
 
           box.appendChild(title);
-          box.appendChild(content);
+          box.appendChild(tabBar);
+          tabNames.forEach((n) => box.appendChild(tabPanels[n]));
           box.appendChild(closeBtn);
           modal.appendChild(box);
           (document.body || document.documentElement).appendChild(modal);
@@ -1035,6 +1389,11 @@ function createWindow() {
               const info = getYtVideoInfo();
               window.electronAPI.notifyVideoEnded({ title: info.title || 'YouTube' });
             }
+            if (window.__ytSleepAtEnd) {
+              window.__ytSleepAtEnd = false;
+              setTimeout(() => { try { video.pause(); } catch (e) {} }, 50); // đợi 1 nhịp để không bị YouTube tự next đè lên
+              showAppToast('⏰ Đã tạm dừng theo hẹn giờ ngủ (hết video)');
+            }
           });
         }
 
@@ -1176,6 +1535,106 @@ function createWindow() {
           applyAudioOutputDevice(wanted).catch(() => {});
         }
 
+        // --- SPONSORBLOCK: tự động bỏ qua đoạn quảng cáo tài trợ trong nội dung video ---
+        if (!window.__ytSponsorBlockInterval) {
+          window.__ytSponsorBlockCache = {}; // videoId -> 'loading' | segments[]
+          window.__ytSponsorBlockInterval = setInterval(() => {
+            try {
+              const s = window.__ytAppSettingsCache || {};
+              if (s.sponsorBlockEnabled === false) return; // mặc định bật nếu chưa load xong settings
+              const vid = getCurrentVideoId();
+              const video = document.querySelector('video');
+              if (!vid || !video) return;
+
+              if (window.__ytSponsorBlockCache[vid] === undefined) {
+                window.__ytSponsorBlockCache[vid] = 'loading';
+                if (window.electronAPI && window.electronAPI.getSponsorSegments) {
+                  window.electronAPI.getSponsorSegments(vid)
+                    .then((segments) => { window.__ytSponsorBlockCache[vid] = segments || []; })
+                    .catch(() => { window.__ytSponsorBlockCache[vid] = []; });
+                }
+                return;
+              }
+
+              const segments = window.__ytSponsorBlockCache[vid];
+              if (!Array.isArray(segments) || segments.length === 0) return;
+
+              const t = video.currentTime;
+              for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
+                if (t >= seg.start && t < seg.end - 0.3) {
+                  video.currentTime = seg.end;
+                  break;
+                }
+              }
+            } catch (e) {}
+          }, 300);
+        }
+
+        // --- CHẾ ĐỘ TẬP TRUNG: ẩn sidebar gợi ý / bình luận, chỉ còn trình phát ---
+        function ensureFocusModeStyle() {
+          if (document.getElementById('yt-app-focus-style')) return;
+          const style = document.createElement('style');
+          style.id = 'yt-app-focus-style';
+          style.textContent = \`
+            html.yt-app-focus-mode #secondary,
+            html.yt-app-focus-mode #comments,
+            html.yt-app-focus-mode ytd-watch-next-secondary-results-renderer,
+            html.yt-app-focus-mode #related,
+            html.yt-app-focus-mode #masthead-ad,
+            html.yt-app-focus-mode ytd-merch-shelf-renderer {
+              display: none !important;
+            }
+            html.yt-app-focus-mode #primary.ytd-watch-flexy,
+            html.yt-app-focus-mode #columns.ytd-watch-flexy {
+              max-width: 1100px !important;
+              margin: 0 auto !important;
+            }
+          \`;
+          document.head.appendChild(style);
+        }
+
+        function applyFocusMode(enabled) {
+          ensureFocusModeStyle();
+          document.documentElement.classList.toggle('yt-app-focus-mode', !!enabled);
+        }
+
+        // --- ÉP CHẤT LƯỢNG CAO NHẤT LUÔN ---
+        function applyForceHighestQuality() {
+          const s = window.__ytAppSettingsCache || {};
+          if (!s.forceHighestQuality) return;
+          const vid = getCurrentVideoId();
+          if (!vid || window.__ytAppLastQualityAppliedVideoId === vid) return;
+          const player = document.getElementById('movie_player');
+          if (player && typeof player.setPlaybackQualityRange === 'function') {
+            try {
+              player.setPlaybackQualityRange('highres', 'highres');
+              if (typeof player.setPlaybackQuality === 'function') player.setPlaybackQuality('highres');
+              window.__ytAppLastQualityAppliedVideoId = vid;
+            } catch (e) {}
+          }
+        }
+
+        // --- GHI LOG LỖI JS VỀ MAIN PROCESS (để debug khi YouTube đổi DOM làm script hỏng) ---
+        if (!window.__ytAppErrorLogBound) {
+          window.__ytAppErrorLogBound = true;
+          window.addEventListener('error', (e) => {
+            if (window.electronAPI && window.electronAPI.logError) {
+              try {
+                window.electronAPI.logError({ message: (e && e.message) ? e.message + ' @ ' + (e.filename || '') + ':' + (e.lineno || '') : 'unknown window error' });
+              } catch (err) {}
+            }
+          });
+          window.addEventListener('unhandledrejection', (e) => {
+            if (window.electronAPI && window.electronAPI.logError) {
+              try {
+                const reason = e && e.reason ? (e.reason.stack || e.reason.message || String(e.reason)) : 'unknown rejection';
+                window.electronAPI.logError({ message: reason });
+              } catch (err) {}
+            }
+          });
+        }
+
         function runAll() {
           try { updateTitle(); } catch(e){}
           try { createButtons(); } catch(e){}
@@ -1186,6 +1645,8 @@ function createWindow() {
           try { bindVideoEndedListener(); } catch(e){}
           try { maybeApplyAudioEnhance(); } catch(e){}
           try { maybeApplyAudioOutputDevice(); } catch(e){}
+          try { applyFocusMode(!!(window.__ytAppSettingsCache && window.__ytAppSettingsCache.focusMode)); } catch(e){}
+          try { applyForceHighestQuality(); } catch(e){}
         }
 
         runAll();
@@ -1422,12 +1883,13 @@ function updatePlaybackUI(data) {
     }
   }
 
-  // Lưu trạng thái để mở lại lần sau (resume watching) — chỉ ghi đĩa tối đa mỗi 10s để tránh ghi file liên tục
-  if (userSettings.resumeWatching && data.url && data.duration > 0) {
+  // Lưu trạng thái để mở lại lần sau (resume watching) + lịch sử xem — tối đa mỗi 10s để tránh ghi file liên tục
+  if (data.url && data.duration > 0) {
     const now = Date.now();
     if (now - lastResumeSaveAt > 10000) {
       lastResumeSaveAt = now;
-      saveResumeState(data.url, data.currentTime || 0);
+      if (userSettings.resumeWatching) saveResumeState(data.url, data.currentTime || 0);
+      addToWatchHistory(data);
     }
   }
 }
@@ -1506,6 +1968,67 @@ ipcMain.on('video-ended', (event, data) => {
       silent: false
     }).show();
   } catch (e) {}
+});
+
+// --- SPONSORBLOCK: lấy danh sách đoạn sponsor để tự động skip ---
+// Fetch từ main process (không phải renderer) để tránh mọi rắc rối CORS.
+ipcMain.handle('get-sponsor-segments', async (event, videoId) => {
+  if (!videoId || typeof videoId !== 'string') return [];
+  try {
+    const categories = encodeURIComponent(JSON.stringify(['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview']));
+    const url = `https://sponsor.ajay.app/api/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${categories}`;
+    const res = await fetch(url);
+    if (res.status === 404 || !res.ok) return []; // 404 = video chưa có ai submit segment nào, không phải lỗi
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((s) => s && Array.isArray(s.segment) && s.segment.length === 2)
+      .map((s) => ({ start: s.segment[0], end: s.segment[1], category: s.category }));
+  } catch (e) {
+    console.warn('SponsorBlock fetch loi:', e.message);
+    return [];
+  }
+});
+
+// --- LỊCH SỬ XEM ---
+ipcMain.handle('get-watch-history', () => watchHistory);
+
+// --- EXPORT / IMPORT CẤU HÌNH ---
+ipcMain.handle('export-settings', async () => {
+  const { dialog } = require('electron');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: 'youtube-desktop-settings.json',
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false };
+  try {
+    fs.writeFileSync(result.filePath, JSON.stringify(userSettings, null, 2));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('import-settings', async () => {
+  const { dialog } = require('electron');
+  const result = await dialog.showOpenDialog(mainWindow, {
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
+  });
+  if (result.canceled || !result.filePaths[0]) return { ok: false };
+  try {
+    const imported = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8'));
+    saveUserSettings(imported);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// --- GHI LOG LỖI TỪ RENDERER (khi YouTube đổi DOM làm script inject hỏng) ---
+ipcMain.on('log-error', (event, payload) => {
+  const msg = (payload && payload.message) ? String(payload.message).slice(0, 500) : 'unknown error';
+  appendErrorLog('renderer', msg);
 });
 
 // --- XỬ LÝ CỬA SỔ FLOATING PIP CỦA ELECTRON ---
