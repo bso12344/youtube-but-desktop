@@ -52,43 +52,32 @@ npm start
 
 ```bash
 npm run build
-```
-
-Builds the `.exe` (NSIS installer + portable) into the `dist/` directory using `electron-builder`.
-
-## Project Structure
 
 ```
-main.js       — all main process logic + scripts injected into the YouTube page
-preload.js    — secure bridge between renderer and main process (contextBridge)
-package.json  — app configuration, dependencies, build config
-icon.ico      — app icon
-```
 
-All custom UI elements (navigation buttons, "..." menu, Settings modal, PiP overlay, etc.) are written in vanilla JS/DOM and injected directly into `youtube.com` via `webContents.executeJavaScript()`. This process repeats every ~2 seconds and after every page navigation to ensure the UI restores itself if YouTube modifies the DOM.
 
-## Data Storage
 
-The app stores the following files in the `userData` directory (`%APPDATA%/youtubeapp` on Windows):
+---
 
-| File | Content |
-|---|---|
-| `user-settings.json` | All user settings |
-| `resume-state.json` | Last watched video and playback timestamp |
-| `watch-history.json` | History of the last 25 watched videos |
-| `app-error.log` | Error logs (renderer + main process), capped at ~2MB |
+## ⌨️ Shortcuts
 
-No data is sent externally, except for: SponsorBlock API calls (sending the video ID to retrieve sponsor segments), Discord calls (if Rich Presence is enabled), and GitHub calls (if auto-update is enabled).
+| Shortcut | Action |
+| --- | --- |
+| **`Alt + P`** | Toggle Native Picture-in-Picture (PiP) |
+| **`F5`** or **`Ctrl + R`** | Reload page |
 
-## Known Limitations
+---
 
-- **Exclusive audio mode** (bit-perfect WASAPI exclusive) — not feasible at the Electron/Chromium layer; requires writing a custom native addon. Planned for a future version.
-- **Notifications for new videos from subscribed channels** — not implemented; requires YouTube Data API + OAuth (broad scope, deferred for later).
-- **Downloading high-quality audio separately from YouTube** — not implemented, because (1) YouTube's audio track is already fixed at the highest available quality, so selecting it separately offers no improvement, and (2) extracting raw stream URLs violates YouTube's Terms of Service.
-- The UI injection script relies on YouTube's current DOM structure — if YouTube changes its interface, certain features (navigation buttons, SponsorBlock selectors, autoplay toggle, etc.) may require selector updates. Check `app-error.log` if you encounter an unusual error.
+## 📄 Disclaimer
 
-## License
+This is an unofficial personal project built with Electron. It is **not affiliated with, endorsed by, or sponsored by** YouTube or Google LLC. All trademarks and logos belong to YouTube / Google LLC.
 
-Open source; free to use, modify, and contribute to. This is an unofficial project and does not represent YouTube or Google.
+---
 
-By the way, this is the 2nd README and made using AI.
+## 📜 License
+
+Distributed under the **MIT License**.
+
+### Last
+
+This is a **AI generated** README.
