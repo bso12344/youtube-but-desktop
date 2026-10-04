@@ -1158,36 +1158,59 @@ function createWindow() {
               outputSpan.innerText = 'Đầu ra âm thanh';
               const outputSelect = document.createElement('select');
               outputSelect.style.cssText = 'background:#2a2a2a;color:#fff;border:1px solid #555;border-radius:6px;padding:4px 8px;font-size:13px;cursor:pointer;max-width:220px;';
-              const loadingOpt = document.createElement('option');
-              loadingOpt.innerText = 'Đang tải danh sách...';
-              outputSelect.appendChild(loadingOpt);
+
+              // Mặc định chỉ có 1 lựa chọn "Theo hệ thống" — KHÔNG tự động xin quyền mic.
+              // Muốn chọn đúng thiết bị cụ thể (DAC/tai nghe riêng) thì bấm nút "Tải danh sách" bên dưới.
+              function populateDefaultOnly() {
+                outputSelect.innerHTML = '';
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = 'default';
+                defaultOpt.innerText = '🔊 Theo hệ thống (mặc định)';
+                outputSelect.appendChild(defaultOpt);
+              }
+              populateDefaultOnly();
+
+              outputSelect.onchange = () => {
+                s.audioOutputDeviceId = outputSelect.value;
+                if (window.electronAPI) window.electronAPI.saveSettings(s);
+                applyAudioOutputDevice(outputSelect.value).then(() => {
+                  showAppToast('🔊 Đã đổi thiết bị âm thanh');
+                }).catch((e) => reportAudioOutputError(e.message));
+              };
+
               outputWrap.appendChild(outputSpan);
               outputWrap.appendChild(outputSelect);
               a.appendChild(outputWrap);
 
-              if (typeof listAudioOutputDevices === 'function') {
+              const outputHint = document.createElement('div');
+              outputHint.style.cssText = 'font-size:11px; color:#888; margin-top:-8px;';
+              outputHint.innerText = 'Chỉ thấy "Theo hệ thống"? Bấm nút dưới để xem tên loa/tai nghe cụ thể (sẽ xin quyền mic tạm thời, không thu âm gì cả, chỉ để đọc tên thiết bị).';
+              a.appendChild(outputHint);
+
+              const loadDevicesBtn = createButton('🔄 Tải danh sách thiết bị cụ thể', () => {
+                loadDevicesBtn.innerText = 'Đang tải...';
+                loadDevicesBtn.disabled = true;
                 listAudioOutputDevices().then((devices) => {
-                  outputSelect.innerHTML = '';
-                  const defaultOpt = document.createElement('option');
-                  defaultOpt.value = 'default';
-                  defaultOpt.innerText = '🔊 Theo hệ thống (mặc định)';
-                  outputSelect.appendChild(defaultOpt);
+                  const currentValue = s.audioOutputDeviceId || 'default';
+                  populateDefaultOnly();
                   devices.forEach((d) => {
                     if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') return;
                     const opt = document.createElement('option');
                     opt.value = d.deviceId;
                     opt.innerText = d.label || ('Thiết bị ' + d.deviceId.slice(0, 8));
-                    if ((s.audioOutputDeviceId || 'default') === d.deviceId) opt.selected = true;
+                    if (currentValue === d.deviceId) opt.selected = true;
                     outputSelect.appendChild(opt);
                   });
-                  outputSelect.onchange = () => {
-                    s.audioOutputDeviceId = outputSelect.value;
-                    if (window.electronAPI) window.electronAPI.saveSettings(s);
-                  };
-                }).catch(() => {
-                  outputSelect.innerHTML = '<option>Không lấy được danh sách thiết bị</option>';
+                  const foundReal = devices.some((d) => d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications');
+                  showAppToast(foundReal ? '🔊 Đã tải danh sách thiết bị' : '⚠️ Không tìm thấy thiết bị cụ thể nào (có thể do Windows chặn quyền mic cho app)');
+                }).catch((e) => {
+                  reportAudioOutputError('Không liệt kê được thiết bị: ' + (e && e.message));
+                }).finally(() => {
+                  loadDevicesBtn.innerText = '🔄 Tải danh sách thiết bị cụ thể';
+                  loadDevicesBtn.disabled = false;
                 });
-              }
+              });
+              a.appendChild(loadDevicesBtn);
 
               // ===== TAB: NÂNG CAO =====
               const adv = tabPanels['Nâng cao'];
@@ -1387,7 +1410,7 @@ function createWindow() {
           video.addEventListener('ended', () => {
             if (window.electronAPI && window.electronAPI.notifyVideoEnded) {
               const info = getYtVideoInfo();
-              window.electronAPI.notifyVideoEnded({ title: info.title || 'YouTube' });
+              window.electronAPI.notifyVideoEnded({ title: info.title || 'YouTube', channelName: info.channelName || '', url: info.url || location.href });
             }
             if (window.__ytSleepAtEnd) {
               window.__ytSleepAtEnd = false;
@@ -1491,40 +1514,77 @@ function createWindow() {
         // --- CHỌN THIẾT BỊ ÂM THANH ĐẦU RA ---
         // Nếu Audio Enhance đang bật -> đổi sinkId của AudioContext (Chrome 110+).
         // Nếu không -> đổi sinkId trực tiếp trên thẻ <video> (hỗ trợ rộng hơn, lâu đời hơn).
+        function withTimeout(promise, ms, label) {
+          return Promise.race([
+            promise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout: ' + label)), ms))
+          ]);
+        }
+
         async function listAudioOutputDevices() {
           try {
-            const permission = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+            const permission = await withTimeout(
+              navigator.permissions.query({ name: 'microphone' }).catch(() => null),
+              3000,
+              'permissions.query'
+            ).catch(() => null);
+
             if (!permission || permission.state !== 'granted') {
-              const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+              const stream = await withTimeout(
+                navigator.mediaDevices.getUserMedia({ audio: true }),
+                4000,
+                'getUserMedia'
+              );
               stream.getTracks().forEach((t) => t.stop());
             }
           } catch (e) {
-            // Không xin được quyền -> vẫn thử liệt kê, có thể tên thiết bị sẽ trống
+            // Timeout hoặc bị từ chối (thường do Windows chặn quyền mic ở tầng hệ điều hành, hoặc máy
+            // không có mic vật lý khiến Chromium phản hồi chậm/không phản hồi) — KHÔNG được để việc này
+            // chặn luôn cả danh sách thiết bị. Bỏ qua và tiếp tục liệt kê bên dưới (tên có thể bị ẩn bớt).
+            if (window.electronAPI && window.electronAPI.logError) {
+              try { window.electronAPI.logError({ message: 'audio-output permission step failed: ' + (e && e.message) }); } catch (err) {}
+            }
           }
+
           try {
-            const devices = await navigator.mediaDevices.enumerateDevices();
+            const devices = await withTimeout(navigator.mediaDevices.enumerateDevices(), 4000, 'enumerateDevices');
             return devices.filter((d) => d.kind === 'audiooutput');
           } catch (e) {
+            if (window.electronAPI && window.electronAPI.logError) {
+              try { window.electronAPI.logError({ message: 'enumerateDevices failed: ' + (e && e.message) }); } catch (err) {}
+            }
             return [];
+          }
+        }
+
+        function reportAudioOutputError(message) {
+          console.warn('Khong the doi thiet bi am thanh dau ra:', message);
+          if (window.electronAPI && window.electronAPI.logError) {
+            try { window.electronAPI.logError({ message: 'audio-output: ' + message }); } catch (e) {}
+          }
+          if (typeof showAppToast === 'function') {
+            showAppToast('⚠️ Không đổi được thiết bị âm thanh: ' + message);
           }
         }
 
         async function applyAudioOutputDevice(deviceId) {
           const id = (!deviceId || deviceId === 'default') ? '' : deviceId;
-          try {
-            if (window.__ytAppAudioGraph && typeof window.__ytAppAudioGraph.ctx.setSinkId === 'function') {
-              await window.__ytAppAudioGraph.ctx.setSinkId(id);
-            } else {
-              const video = document.querySelector('video');
-              if (video && typeof video.setSinkId === 'function') {
-                await video.setSinkId(id);
-              }
-            }
+
+          if (window.__ytAppAudioGraph && typeof window.__ytAppAudioGraph.ctx.setSinkId === 'function') {
+            await window.__ytAppAudioGraph.ctx.setSinkId(id);
             window.__ytAppLastAppliedSinkId = deviceId || 'default';
-          } catch (e) {
-            console.warn('Khong the doi thiet bi am thanh dau ra:', e.message);
-            throw e;
+            return;
           }
+
+          const video = document.querySelector('video');
+          if (!video) {
+            throw new Error('Chưa có video nào đang mở');
+          }
+          if (typeof video.setSinkId !== 'function') {
+            throw new Error('Trình duyệt/Electron này không hỗ trợ setSinkId (bản Electron quá cũ?)');
+          }
+          await video.setSinkId(id);
+          window.__ytAppLastAppliedSinkId = deviceId || 'default';
         }
 
         function maybeApplyAudioOutputDevice() {
@@ -1532,7 +1592,7 @@ function createWindow() {
           const wanted = s.audioOutputDeviceId || 'default';
           if (window.__ytAppLastAppliedSinkId === wanted) return; // đã đúng thiết bị rồi, khỏi gọi lại
           if (!document.querySelector('video')) return;
-          applyAudioOutputDevice(wanted).catch(() => {});
+          applyAudioOutputDevice(wanted).catch((e) => reportAudioOutputError(e.message));
         }
 
         // --- SPONSORBLOCK: tự động bỏ qua đoạn quảng cáo tài trợ trong nội dung video ---
@@ -1959,15 +2019,88 @@ ipcMain.on('discord-presence-update', (event, data) => {
   updatePlaybackUI(data);
 });
 ipcMain.on('check-for-updates', () => initAutoUpdater(false));
+// --- TOAST THÔNG BÁO TUỲ CHỈNH (style YouTube, thay cho Notification native của Windows) ---
+let notificationWindow = null;
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function showCustomNotification(data) {
+  try {
+    const { screen } = require('electron');
+    const display = screen.getPrimaryDisplay();
+    const { width, height } = display.workAreaSize;
+    const WIN_W = 360;
+    const WIN_H = 96;
+
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.destroy();
+    }
+
+    notificationWindow = new BrowserWindow({
+      width: WIN_W,
+      height: WIN_H,
+      x: width - WIN_W - 16,
+      y: height - WIN_H - 16,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      focusable: false,
+      show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+
+    const title = escapeHtml(data.title);
+    const channelName = escapeHtml(data.channelName);
+    const thumbnailUrl = data.thumbnailUrl ? escapeHtml(data.thumbnailUrl) : '';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+      html,body{margin:0;padding:0;background:transparent;overflow:hidden;font-family:Roboto,Arial,sans-serif;}
+      .toast{display:flex;align-items:center;gap:12px;width:336px;height:80px;box-sizing:border-box;padding:12px;background:#0f0f0f;color:#fff;border-radius:12px;border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 30px rgba(0,0,0,0.6);animation:slideIn .35s ease forwards;}
+      @keyframes slideIn{from{transform:translateX(120%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+      .thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;background:#222;flex-shrink:0;}
+      .text{overflow:hidden;}
+      .brand{display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa;margin-bottom:4px;}
+      .brand svg{width:13px;height:13px;fill:#ff0000;flex-shrink:0;}
+      .title{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .channel{font-size:11px;color:#aaa;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    </style></head><body>
+      <div class="toast">
+        <img class="thumb" src="${thumbnailUrl}" onerror="this.style.display='none'">
+        <div class="text">
+          <div class="brand"><svg viewBox="0 0 24 24"><path d="M19 11h-8v6h8v-6zm4 8V5c0-1.1-.9-2-2-2H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2zm-2 0H3V5h18v14z"/></svg><span>Video đã kết thúc</span></div>
+          <div class="title">${title}</div>
+          <div class="channel">${channelName}</div>
+        </div>
+      </div>
+    </body></html>`;
+
+    notificationWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    notificationWindow.once('ready-to-show', () => {
+      if (notificationWindow && !notificationWindow.isDestroyed()) notificationWindow.showInactive();
+    });
+
+    const winRef = notificationWindow;
+    setTimeout(() => {
+      if (winRef && !winRef.isDestroyed()) winRef.destroy();
+    }, 6000);
+  } catch (e) {
+    appendErrorLog('showCustomNotification', e.message);
+  }
+}
+
 ipcMain.on('video-ended', (event, data) => {
   if (!userSettings.notifyOnVideoEnd) return;
-  try {
-    new Notification({
-      title: 'Video đã kết thúc',
-      body: (data && data.title) ? data.title : 'YouTube Desktop',
-      silent: false
-    }).show();
-  } catch (e) {}
+  const videoId = data && data.url ? getVideoIdFromYtUrl(data.url) : null;
+  showCustomNotification({
+    title: (data && data.title) ? data.title : 'YouTube',
+    channelName: data && data.channelName ? data.channelName : '',
+    thumbnailUrl: videoId ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : ''
+  });
 });
 
 // --- SPONSORBLOCK: lấy danh sách đoạn sponsor để tự động skip ---
@@ -2236,8 +2369,14 @@ app.whenReady().then(() => {
   // trả về TÊN THẬT của loa/tai nghe (Chromium ẩn tên thiết bị nếu chưa có quyền mic/cam nào
   // được cấp, vì lý do chống fingerprinting). App KHÔNG thu âm gì cả, chỉ cần quyền để đọc tên thiết bị output.
   const { session } = require('electron');
+  const ALLOWED_PERMISSIONS = ['media', 'fullscreen'];
   session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
-    callback(permission === 'media');
+    callback(ALLOWED_PERMISSIONS.includes(permission));
+  });
+  // navigator.permissions.query() đọc qua handler NÀY, không phải handler ở trên —
+  // nếu chỉ set request handler thì permissions.query vẫn báo sai trạng thái.
+  session.defaultSession.setPermissionCheckHandler((webContents, permission) => {
+    return ALLOWED_PERMISSIONS.includes(permission);
   });
 
   createWindow();
